@@ -1,0 +1,6 @@
+server_address = "irc.quakenet.org";
+server_port = "6667";
+username = "ircbot";
+nickname = "unique_bot_name";
+channel_name = "#bot_testing";
+

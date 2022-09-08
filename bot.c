@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <signal.h>
+#include <libconfig.h>
 
 #ifdef USE_SSL
 #include <openssl/bio.h>
@@ -23,11 +24,15 @@
 #endif
 
 #define BUFFER_SIZE     512
-#define SERVER_ADDRESS  ""
-#define SERVER_PORT     ""
-#define USERNAME        ""
-#define NICKNAME        ""
-#define CHANNEL_NAME    ""
+#define CONFIG_FILE     "bot.cfg"
+
+typedef struct {
+    char server_address[64];
+    char server_port[10];
+    char username[32];
+    char nickname[32];
+    char channel_name[32];
+} bot_config;
 
 int create_connection(const char address[], const char port[]) {
     struct addrinfo hints, *result = NULL, *rp = NULL;
@@ -49,7 +54,7 @@ int create_connection(const char address[], const char port[]) {
         struct sockaddr_in *addr4 = (struct sockaddr_in*)rp->ai_addr;
         inet_ntop(AF_INET, &addr4->sin_addr, ipv4, INET_ADDRSTRLEN);
 
-        printf("Connecting to %s:%s\n", ipv4, SERVER_PORT);
+        printf("Connecting to %s:%s\n", ipv4, port);
 
         if ((sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol)) == -1) {
             printf("socket() failed\n");
@@ -203,7 +208,7 @@ void send_msg(int sockfd, const char msg[]) {
             break;
         }
 
-        printf("SSL_write(): %d bytes sent\n", write_bytes);
+        printf("write(): %d bytes sent\n", write_bytes);
 
         total_write_bytes += write_bytes;
     }
@@ -225,9 +230,9 @@ void send_msg(int sockfd, const char msg[]) {
 //
 // <crlf>     ::= CR LF
 #ifdef USE_SSL
-void ssl_handle_line(SSL *ssl, char line[]) {
+void ssl_handle_line(SSL *ssl, char line[], bot_config *config) {
 #else
-void handle_line(int sockfd, char line[]) {
+void handle_line(int sockfd, char line[], bot_config *config) {
 #endif
     if (*line == '\0') return;
 
@@ -281,12 +286,12 @@ void handle_line(int sockfd, char line[]) {
     } else if (strcmp(command, "KICK") == 0) { // 0: channel, 1: nick, 2: reason
         if (*paramv[0] != '#') return;
 
-        if (strcasecmp(paramv[1], NICKNAME) == 0) { // bot kicked
+        if (strcasecmp(paramv[1], config->nickname) == 0) { // bot kicked
             snprintf(response, BUFFER_SIZE, "JOIN %s", paramv[0]); // re-join
             send = true;
         }
     } else if (strcmp(command, "376") == 0 || strcmp(command, "422") == 0) { // end of motd
-        snprintf(response, BUFFER_SIZE, "JOIN %s", CHANNEL_NAME);
+        snprintf(response, BUFFER_SIZE, "JOIN %s", config->channel_name);
         send = true;
     }
 
@@ -362,13 +367,13 @@ char* get_lines(int sockfd) {
 }
 
 #ifdef USE_SSL
-void ssl_auth_user(SSL *ssl) {
+void ssl_auth_user(SSL *ssl, bot_config *config) {
 #else
-void auth_user(int sockfd) {
+void auth_user(int sockfd, bot_config *config) {
 #endif
     char authMsg[BUFFER_SIZE];
 
-    snprintf(authMsg, BUFFER_SIZE, "USER %s 0 * :%s\r\nNICK %s", USERNAME, USERNAME, NICKNAME);
+    snprintf(authMsg, BUFFER_SIZE, "USER %s 0 * :%s\r\nNICK %s", config->username, config->username, config->nickname);
     #ifdef USE_SSL
     ssl_send_msg(ssl, authMsg);
     #else
@@ -376,10 +381,64 @@ void auth_user(int sockfd) {
     #endif
 }
 
-int main() {
-    int sockfd = -1;
+bool load_config_value(config_t *cfg, const char name[], char* result) {
+    const char *tmp_str;
 
-    if ((sockfd = create_connection(SERVER_ADDRESS, SERVER_PORT)) == -1) {
+    if (!config_lookup_string(cfg, name, &tmp_str)) {
+        printf("Configuration missing for field '%s'\n", name);
+        return false;
+    }
+
+    strcpy(result, tmp_str);
+    return true;
+}
+
+
+bool load_config(const char filename[], bot_config **config) {
+    config_t cfg_file;
+    config_init(&cfg_file);
+
+    if (!config_read_file(&cfg_file, filename)) {
+        fprintf(stderr, "Loading config '%s' failed with code %d (%s)\n", filename,
+                config_error_line(&cfg_file), config_error_text(&cfg_file));
+
+        config_destroy(&cfg_file);
+
+        return false;
+    }
+
+    *config = (bot_config*)malloc(sizeof(bot_config));
+    bool load_ok = true;
+
+    if (!load_config_value(&cfg_file, "server_address", (*config)->server_address)) {
+        load_ok = false;
+    }
+    if (!load_config_value(&cfg_file, "server_port", (*config)->server_port)) {
+        load_ok = false;
+    }
+    if (!load_config_value(&cfg_file, "username", (*config)->username)) {
+        load_ok = false;
+    }
+    if (!load_config_value(&cfg_file, "nickname", (*config)->nickname)) {
+        load_ok = false;
+    }
+    if (!load_config_value(&cfg_file, "channel_name", (*config)->channel_name)) {
+        load_ok = false;
+    }
+
+    config_destroy(&cfg_file);
+    return load_ok;
+}
+
+int main() {
+    bot_config *botcfg = NULL;
+    if (!load_config(CONFIG_FILE, &botcfg)) {
+        free(botcfg);
+        return 1;
+    }
+
+    int sockfd = -1;
+    if ((sockfd = create_connection(botcfg->server_address, botcfg->server_port)) == -1) {
         printf("Failed to connect\n");
         return 1;
     } else {
@@ -411,15 +470,15 @@ int main() {
         printf("SSL initialized\n");
     }
 
-    if (!check_cert(ssl, SERVER_ADDRESS)) {
+    if (!check_cert(ssl, botcfg->server_address)) {
         return 1;
     }
     #endif
 
     #ifdef USE_SSL
-    ssl_auth_user(ssl);
+    ssl_auth_user(ssl, botcfg);
     #else
-    auth_user(sockfd);
+    auth_user(sockfd, botcfg);
     #endif
 
     while (true) {
@@ -434,9 +493,9 @@ int main() {
         char *tok = lines;
         while ((line = strsep(&tok, "\r\n")) != NULL)
         #ifdef USE_SSL
-        ssl_handle_line(ssl, line);
+        ssl_handle_line(ssl, line, botcfg);
         #else
-        handle_line(sockfd, line);
+        handle_line(sockfd, line, botcfg);
         #endif
 
         free(lines);
@@ -449,6 +508,7 @@ int main() {
     #endif
 
     close(sockfd);
+    free(botcfg);
 
     return 0;
 }
