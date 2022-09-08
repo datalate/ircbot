@@ -38,7 +38,7 @@ int create_connection(const char address[], const char port[]) {
     struct addrinfo hints, *result = NULL, *rp = NULL;
     int sockfd = -1;
 
-    memset(&hints, 0, sizeof(struct addrinfo));
+    memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = 0;
@@ -340,14 +340,14 @@ char* get_lines(int sockfd) {
             if (error_code == SSL_ERROR_WANT_READ) continue; else break;
         }
 
-        printf("SSL_read(): %d bytes received into %p\n", recv_bytes, (void*)&recv_buffer);
+        printf("SSL_read(): %d bytes received into %p\n", recv_bytes, &recv_buffer);
         #else
         if ((recv_bytes = read(sockfd, recv_buffer + total_recv_bytes, BUFFER_SIZE)) == -1) {
             printf("read() failed");
             break;
         }
 
-        printf("read(): %d bytes received into %p\n", recv_bytes, (void*)&recv_buffer);
+        printf("read(): %d bytes received into %p\n", recv_bytes, &recv_buffer);
         #endif
 
         total_recv_bytes += recv_bytes;
@@ -407,7 +407,7 @@ bool load_config(const char filename[], bot_config **config) {
         return false;
     }
 
-    *config = (bot_config*)malloc(sizeof(bot_config));
+    *config = malloc(sizeof(**config));
     bool load_ok = true;
 
     if (!load_config_value(&cfg_file, "server_address", (*config)->server_address)) {
