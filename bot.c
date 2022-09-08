@@ -24,6 +24,7 @@
 #endif
 
 #define BUFFER_SIZE     512
+#define RETRY_INTERVAL  60
 #define CONFIG_FILE     "bot.cfg"
 
 typedef struct {
@@ -342,8 +343,8 @@ char* get_lines(int sockfd) {
 
         printf("SSL_read(): %d bytes received into %p\n", recv_bytes, &recv_buffer);
         #else
-        if ((recv_bytes = read(sockfd, recv_buffer + total_recv_bytes, BUFFER_SIZE)) == -1) {
-            printf("read() failed");
+        if ((recv_bytes = read(sockfd, recv_buffer + total_recv_bytes, BUFFER_SIZE)) <= 0) {
+            printf("read() failed\n");
             break;
         }
 
@@ -373,7 +374,8 @@ void auth_user(int sockfd, bot_config *config) {
 #endif
     char authMsg[BUFFER_SIZE];
 
-    snprintf(authMsg, BUFFER_SIZE, "USER %s 0 * :%s\r\nNICK %s", config->username, config->username, config->nickname);
+    snprintf(authMsg, BUFFER_SIZE, "USER %s 0 * :%s\r\nNICK %s",
+             config->username, config->username, config->nickname);
     #ifdef USE_SSL
     ssl_send_msg(ssl, authMsg);
     #else
@@ -437,14 +439,6 @@ int main() {
         return 1;
     }
 
-    int sockfd = -1;
-    if ((sockfd = create_connection(botcfg->server_address, botcfg->server_port)) == -1) {
-        printf("Failed to connect\n");
-        return 1;
-    } else {
-        printf("Connection ok\n");
-    }
-
     #ifdef USE_SSL
     SSL_CTX *ssl_ctx = NULL;
     SSL *ssl = NULL;
@@ -452,53 +446,75 @@ int main() {
         printf("Failed to create SSL context\n");
         return 1;
     }
-
-    if ((ssl = SSL_new(ssl_ctx)) == NULL) {
-        printf("SSL_new() failed\n");
-        return 1;
-    }
-    
-    if (SSL_set_fd(ssl, sockfd) == 0) {
-        printf("SSL_set_fd() failed\n");
-        return 1;
-    }
-    
-    if (SSL_connect(ssl) != 1) {
-        printf("SSL_connect() failed\n");
-        return 1;
-    } else {
-        printf("SSL initialized\n");
-    }
-
-    if (!check_cert(ssl, botcfg->server_address)) {
-        return 1;
-    }
     #endif
 
-    #ifdef USE_SSL
-    ssl_auth_user(ssl, botcfg);
-    #else
-    auth_user(sockfd, botcfg);
-    #endif
+    while (true) { // connection initiation
+        int sockfd = -1;
+        if ((sockfd = create_connection(botcfg->server_address, botcfg->server_port)) == -1) {
+            printf("Failed to connect, waiting for %d seconds and trying again\n", RETRY_INTERVAL);
+            sleep(RETRY_INTERVAL);
+            continue;
+        } else {
+            printf("Connection ok\n");
+        }
 
-    while (true) {
         #ifdef USE_SSL
-        char *lines = ssl_get_lines(ssl);
-        #else
-        char *lines = get_lines(sockfd);
-        #endif
-        if (lines == NULL) break;
+        if (ssl != NULL && SSL_clear(ssl) == 0) {
+            printf("SSL_clear() failed\n");
+            break;
+        }
+        else if ((ssl = SSL_new(ssl_ctx)) == NULL) {
+            printf("SSL_new() failed\n");
+            break;
+        }
 
-        char *line = NULL;
-        char *tok = lines;
-        while ((line = strsep(&tok, "\r\n")) != NULL)
+        if (SSL_set_fd(ssl, sockfd) == 0) {
+            printf("SSL_set_fd() failed\n");
+            break;
+        }
+
+        if (SSL_connect(ssl) != 1) {
+            printf("SSL_connect() failed\n");
+            break;
+        } else {
+            printf("SSL initialized\n");
+        }
+
+        if (!check_cert(ssl, botcfg->server_address)) {
+            break;
+        }
+        #endif
+
         #ifdef USE_SSL
-        ssl_handle_line(ssl, line, botcfg);
+        ssl_auth_user(ssl, botcfg);
         #else
-        handle_line(sockfd, line, botcfg);
+        auth_user(sockfd, botcfg);
         #endif
 
-        free(lines);
+        while (true) { // connected to the server
+            #ifdef USE_SSL
+            char *lines = ssl_get_lines(ssl);
+            #else
+            char *lines = get_lines(sockfd);
+            #endif
+            if (lines == NULL) break; // disconnected
+
+            char *line = NULL;
+            char *tok = lines;
+            while ((line = strsep(&tok, "\r\n")) != NULL)
+            #ifdef USE_SSL
+            ssl_handle_line(ssl, line, botcfg);
+            #else
+            handle_line(sockfd, line, botcfg);
+            #endif
+
+            free(lines);
+        }
+
+        close(sockfd);
+
+        printf("Connection was lost, trying to reconnect after %d seconds\n", RETRY_INTERVAL);
+        sleep(RETRY_INTERVAL);
     }
 
     printf("Cleaning up resources and exiting\n");
@@ -507,7 +523,6 @@ int main() {
     SSL_CTX_free(ssl_ctx);
     #endif
 
-    close(sockfd);
     free(botcfg);
 
     return 0;
