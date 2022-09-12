@@ -28,11 +28,18 @@
 #define CONFIG_FILE     "bot.cfg"
 
 typedef struct {
+    char match[64];
+    char reply[128];
+} bot_config_reply;
+
+typedef struct {
     char server_address[64];
     char server_port[10];
     char username[32];
     char nickname[32];
     char channel_name[32];
+    bot_config_reply replies[32]; // TODO: increase max number or allocate in heap
+    unsigned int num_replies;
 } bot_config;
 
 int create_connection(const char address[], const char port[]) {
@@ -243,8 +250,6 @@ void handle_line(int sockfd, char line[], bot_config *config) {
     char *paramv[15];
     int paramc = 0;
 
-    static const char googleCmd[] = "!google";
-
     printf("RECV: %s\n", line);
 
     if (*tok == ':') {
@@ -274,9 +279,12 @@ void handle_line(int sockfd, char line[], bot_config *config) {
     } else if (strcmp(command, "PRIVMSG") == 0) { // 0: target, 1: message
         if (*paramv[0] != '#') return; // only responsd to channel messages
 
-        if (strncasecmp(paramv[1], googleCmd, strlen(googleCmd)) == 0) {
-            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", paramv[0], "https://google.com");
-            send = true;
+        for (int i = 0; i < config->num_replies; ++i) {
+            if (strncasecmp(paramv[1], config->replies[i].match, strlen(config->replies[i].match)) == 0) {
+                snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", paramv[0], config->replies[i].reply);
+                send = true;
+                break;
+            }
         }
     } else if (strcmp(command, "MODE") == 0) { // 0: target, 1: mode
     } else if (strcmp(command, "INVITE") == 0) { // 0: target, 1: channel
@@ -427,6 +435,32 @@ bool load_config(const char filename[], bot_config **config) {
     if (!load_config_value(&cfg_file, "channel_name", (*config)->channel_name)) {
         load_ok = false;
     }
+
+    unsigned int replies_count = 0;
+    config_setting_t *reply_cfg = config_lookup(&cfg_file, "replies");
+
+    if (reply_cfg != NULL) {
+        unsigned int reply_cfg_count = config_setting_length(reply_cfg);
+
+        for (int i = 0; i < reply_cfg_count; ++i) {
+            config_setting_t *reply_cfg_row = config_setting_get_elem(reply_cfg, i);
+            const char *match_str, *reply_str;
+
+            if (!(config_setting_lookup_string(reply_cfg_row, "match", &match_str) &&
+                  config_setting_lookup_string(reply_cfg_row, "reply", &reply_str))) {
+
+                printf("Ignored invalid row '%d' from reply config\n", i);
+                continue;
+            }
+
+            strcpy((*config)->replies[replies_count].match, match_str);
+            strcpy((*config)->replies[replies_count].reply, reply_str);
+            replies_count++;
+        }
+    }
+
+    (*config)->num_replies = replies_count;
+    printf("Loaded %u replies from the config file\n", replies_count);
 
     config_destroy(&cfg_file);
     return load_ok;
