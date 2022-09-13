@@ -35,12 +35,88 @@ typedef struct {
 typedef struct {
     char server_address[64];
     char server_port[10];
-    char username[32];
-    char nickname[32];
-    char channel_name[32];
+    char username[16];
+    char nickname[16]; // NICKLEN = 9
+    char channel_name[64]; // CHANNELLEN=50
+    char admin_hostname[64];
     size_t num_replies;
     bot_config_reply replies[];
 } bot_config;
+
+bool load_config_value(config_t *cfg, const char name[], char* result) {
+    const char *tmp_str;
+
+    if (!config_lookup_string(cfg, name, &tmp_str)) {
+        printf("Configuration missing for field '%s'\n", name);
+        return false;
+    }
+
+    strcpy(result, tmp_str);
+    return true;
+}
+
+bool load_config(const char filename[], bot_config **config) {
+    config_t cfg_file;
+    config_init(&cfg_file);
+    bot_config *new_config;
+
+    if (!config_read_file(&cfg_file, filename)) {
+        fprintf(stderr, "Loading config '%s' failed with code %d (%s)\n", filename,
+                config_error_line(&cfg_file), config_error_text(&cfg_file));
+
+        config_destroy(&cfg_file);
+
+        return false;
+    }
+
+    unsigned int replies_count = 0;
+    config_setting_t *reply_cfg = config_lookup(&cfg_file, "replies");
+
+    if (reply_cfg == NULL) {
+        new_config = malloc(sizeof(*new_config));
+    } else {
+        unsigned int reply_cfg_count = config_setting_length(reply_cfg);
+        new_config = malloc(sizeof(*new_config) + reply_cfg_count * sizeof(new_config->replies[0]));
+
+        for (unsigned int i = 0; i < reply_cfg_count; ++i) {
+            config_setting_t *reply_cfg_row = config_setting_get_elem(reply_cfg, i);
+            const char *match_str, *reply_str;
+
+            if (!(config_setting_lookup_string(reply_cfg_row, "match", &match_str) &&
+                  config_setting_lookup_string(reply_cfg_row, "reply", &reply_str))) {
+
+                printf("Ignored invalid row '%d' from reply config\n", i);
+                continue;
+            }
+
+            strcpy(new_config->replies[replies_count].match, match_str);
+            strcpy(new_config->replies[replies_count].reply, reply_str);
+            replies_count++;
+        }
+    }
+
+    new_config->num_replies = replies_count;
+    printf("Loaded %u replies from the config\n", replies_count);
+
+    bool load_ok =
+        load_config_value(&cfg_file, "server_address", new_config->server_address) &&
+        load_config_value(&cfg_file, "server_port", new_config->server_port) &&
+        load_config_value(&cfg_file, "username", new_config->username) &&
+        load_config_value(&cfg_file, "nickname", new_config->nickname) &&
+        load_config_value(&cfg_file, "channel_name", new_config->channel_name) &&
+        load_config_value(&cfg_file, "admin_hostname", new_config->admin_hostname);
+
+    if (load_ok) {
+        if ((*config) != NULL)
+            free(*config);
+        *config = new_config;
+    } else {
+        free(new_config);
+    }
+
+    config_destroy(&cfg_file);
+    return load_ok;
+}
 
 int create_connection(const char address[], const char port[]) {
     struct addrinfo hints, *result = NULL, *rp = NULL;
@@ -243,9 +319,9 @@ void send_msg(int sockfd, const char msg[]) {
 //
 // <crlf>     ::= CR LF
 #ifdef USE_SSL
-void ssl_handle_line(SSL *ssl, char line[], bot_config *config) {
+void ssl_handle_line(SSL *ssl, char line[], bot_config **config) {
 #else
-void handle_line(int sockfd, char line[], bot_config *config) {
+void handle_line(int sockfd, char line[], bot_config **config) {
 #endif
     if (*line == '\0') return;
 
@@ -282,11 +358,11 @@ void handle_line(int sockfd, char line[], bot_config *config) {
         snprintf(response, BUFFER_SIZE, "PONG %s", params);
         send = true;
     } else if (strcmp(command, "PRIVMSG") == 0) { // 0: target, 1: message
-        if (*paramv[0] != '#') return; // only responsd to channel messages
+        if (*paramv[0] != '#') return; // only respond to channel messages
 
-        for (unsigned int i = 0; i < config->num_replies; ++i) {
-            if (strncasecmp(paramv[1], config->replies[i].match, strlen(config->replies[i].match)) == 0) {
-                snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", paramv[0], config->replies[i].reply);
+        for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
+            if (strcasecmp(paramv[1], (*config)->replies[i].match) == 0) {
+                snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", paramv[0], (*config)->replies[i].reply);
                 send = true;
                 break;
             }
@@ -300,15 +376,16 @@ void handle_line(int sockfd, char line[], bot_config *config) {
     } else if (strcmp(command, "KICK") == 0) { // 0: channel, 1: nick, 2: reason
         if (*paramv[0] != '#') return;
 
-        if (strcasecmp(paramv[1], config->nickname) == 0) { // bot kicked
+        // TODO: compare to current nick instead of nick in config
+        if (strcasecmp(paramv[1], (*config)->nickname) == 0) { // bot kicked
             snprintf(response, BUFFER_SIZE, "JOIN %s", paramv[0]); // re-join
             send = true;
         }
     } else if (strcmp(command, "433") == 0) { // nick in use
-        snprintf(response, BUFFER_SIZE, "NICK %s_", config->nickname);
+        snprintf(response, BUFFER_SIZE, "NICK %s_", (*config)->nickname);
         send = true;
     } else if (strcmp(command, "376") == 0 || strcmp(command, "422") == 0) { // end of motd
-        snprintf(response, BUFFER_SIZE, "JOIN %s", config->channel_name);
+        snprintf(response, BUFFER_SIZE, "JOIN %s", (*config)->channel_name);
         send = true;
     }
 
@@ -399,87 +476,9 @@ void auth_user(int sockfd, bot_config *config) {
     #endif
 }
 
-bool load_config_value(config_t *cfg, const char name[], char* result) {
-    const char *tmp_str;
-
-    if (!config_lookup_string(cfg, name, &tmp_str)) {
-        printf("Configuration missing for field '%s'\n", name);
-        return false;
-    }
-
-    strcpy(result, tmp_str);
-    return true;
-}
-
-
-bool load_config(const char filename[], bot_config **config) {
-    config_t cfg_file;
-    config_init(&cfg_file);
-
-    if (!config_read_file(&cfg_file, filename)) {
-        fprintf(stderr, "Loading config '%s' failed with code %d (%s)\n", filename,
-                config_error_line(&cfg_file), config_error_text(&cfg_file));
-
-        config_destroy(&cfg_file);
-
-        return false;
-    }
-
-    unsigned int replies_count = 0;
-    config_setting_t *reply_cfg = config_lookup(&cfg_file, "replies");
-
-    if (reply_cfg == NULL) {
-        *config = malloc(sizeof(**config));
-    } else {
-        unsigned int reply_cfg_count = config_setting_length(reply_cfg);
-        *config = malloc(sizeof(**config) + reply_cfg_count * sizeof((*config)->replies[0]));
-
-        for (unsigned int i = 0; i < reply_cfg_count; ++i) {
-            config_setting_t *reply_cfg_row = config_setting_get_elem(reply_cfg, i);
-            const char *match_str, *reply_str;
-
-            if (!(config_setting_lookup_string(reply_cfg_row, "match", &match_str) &&
-                  config_setting_lookup_string(reply_cfg_row, "reply", &reply_str))) {
-
-                printf("Ignored invalid row '%d' from reply config\n", i);
-                continue;
-            }
-
-            strcpy((*config)->replies[replies_count].match, match_str);
-            strcpy((*config)->replies[replies_count].reply, reply_str);
-            replies_count++;
-        }
-    }
-
-    (*config)->num_replies = replies_count;
-    printf("Loaded %u replies from the config\n", replies_count);
-
-    bool load_ok = true;
-
-    if (!load_config_value(&cfg_file, "server_address", (*config)->server_address)) {
-        load_ok = false;
-    }
-    if (!load_config_value(&cfg_file, "server_port", (*config)->server_port)) {
-        load_ok = false;
-    }
-    if (!load_config_value(&cfg_file, "username", (*config)->username)) {
-        load_ok = false;
-    }
-    if (!load_config_value(&cfg_file, "nickname", (*config)->nickname)) {
-        load_ok = false;
-    }
-    if (!load_config_value(&cfg_file, "channel_name", (*config)->channel_name)) {
-        load_ok = false;
-    }
-
-    config_destroy(&cfg_file);
-    return load_ok;
-}
-
 int main() {
     bot_config *botcfg = NULL;
     if (!load_config(CONFIG_FILE, &botcfg)) {
-        free(botcfg);
         return 1;
     } else {
         printf("Config file '%s' loaded successfully\n", CONFIG_FILE);
@@ -549,9 +548,9 @@ int main() {
             char *tok = lines;
             while ((line = strsep(&tok, "\r\n")) != NULL)
             #ifdef USE_SSL
-            ssl_handle_line(ssl, line, botcfg);
+            ssl_handle_line(ssl, line, &botcfg);
             #else
-            handle_line(sockfd, line, botcfg);
+            handle_line(sockfd, line, &botcfg);
             #endif
 
             free(lines);
