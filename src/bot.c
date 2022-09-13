@@ -1,6 +1,6 @@
 #define _DEFAULT_SOURCE
 #define _GNU_SOURCE
-#define USE_SSL
+//#define USE_SSL
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -208,6 +208,8 @@ void ssl_send_msg(SSL *ssl, const char msg[]) {
 
 void send_msg(int sockfd, const char msg[]) {
     char *send_buffer = format_msg(msg);
+    if (send_buffer == NULL) return;
+
     int len = strlen(send_buffer);
     
     int total_write_bytes = 0, write_bytes = 0;
