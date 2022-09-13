@@ -158,21 +158,22 @@ bool check_cert(SSL *ssl, const char host[]) {
 #endif
 
 char* format_msg(const char msg[]) {
-    char *formatted;
     int len = strlen(msg);
+    char *formatted = malloc(len + 2 + 1);
+    if (formatted == NULL) return NULL;
 
-    if (len >= BUFFER_SIZE - 2) {
-        // Maximum message length is BUFFER_SIZE - CRLF
-        printf("Warning: Truncated %d characters from sent message\n", len - BUFFER_SIZE - 2);
-        len = BUFFER_SIZE - 2;
+    if (len > BUFFER_SIZE - 3) {
+        // Maximum message length is BUFFER_SIZE - CRLF - \0
+        printf("Warning: Truncated %d characters from sent message\n", len - (BUFFER_SIZE - 3));
+        len = BUFFER_SIZE - 3;
     }
 
-    formatted = strndup(msg, len);
+    strncpy(formatted, msg, len);
 
     // Append CRLF
     formatted[len++] = '\r';
     formatted[len++] = '\n';
-    formatted[len] = '\0'; // for printing, not included in message
+    formatted[len] = '\0';
 
     return formatted;
 }
@@ -180,6 +181,8 @@ char* format_msg(const char msg[]) {
 #ifdef USE_SSL
 void ssl_send_msg(SSL *ssl, const char msg[]) {
     char *send_buffer = format_msg(msg);
+    if (send_buffer == NULL) return;
+
     int len = strlen(send_buffer);
     
     int total_write_bytes = 0, write_bytes = 0;
