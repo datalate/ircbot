@@ -328,6 +328,7 @@ void handle_line(int sockfd, char line[], bot_config **config) {
     char *tok = line;
     char response[BUFFER_SIZE];
     char prefix[256], command[32], params[500]; // TODO: check lengths
+    char nick[16], user[16], host[64]; // NICKLEN=9
     char *paramv[15];
     int paramc = 0;
 
@@ -336,6 +337,18 @@ void handle_line(int sockfd, char line[], bot_config **config) {
     if (*tok == ':') {
         // <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
         strcpy(prefix, strsep(&tok, " ") + 1);
+
+        char *prefix_tmp = strdup(prefix);
+        char *prefix_tok = prefix_tmp;
+
+        strcpy(nick, strsep(&prefix_tok, "!"));
+        if (prefix_tok != NULL) {
+            strcpy(user, strsep(&prefix_tok, "@"));
+            if (prefix_tok != NULL) {
+                strcpy(host, prefix_tok);
+            }
+        }
+        free(prefix_tmp);
     }
 
     strcpy(command, strsep(&tok, " "));
@@ -360,11 +373,17 @@ void handle_line(int sockfd, char line[], bot_config **config) {
     } else if (strcmp(command, "PRIVMSG") == 0) { // 0: target, 1: message
         if (*paramv[0] != '#') return; // only respond to channel messages
 
-        for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
-            if (strcasecmp(paramv[1], (*config)->replies[i].match) == 0) {
-                snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", paramv[0], (*config)->replies[i].reply);
-                send = true;
-                break;
+        bool is_admin = strcmp(host, (*config)->admin_hostname) == 0;
+
+        if (is_admin && strcasecmp(paramv[1], "!reload") == 0) {
+            load_config(CONFIG_FILE, config);
+        } else {
+            for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
+                if (strcasecmp(paramv[1], (*config)->replies[i].match) == 0) {
+                    snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", paramv[0], (*config)->replies[i].reply);
+                    send = true;
+                    break;
+                }
             }
         }
     } else if (strcmp(command, "MODE") == 0) { // 0: target, 1: mode
