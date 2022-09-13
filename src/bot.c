@@ -23,9 +23,9 @@
 #include <openssl/x509_vfy.h>
 #endif
 
-#define BUFFER_SIZE     512
-#define RETRY_INTERVAL  60
-#define CONFIG_FILE     "bot.cfg"
+#define BUFFER_SIZE         512
+#define RECONNECT_INTERVAL  60
+#define CONFIG_FILE         "bot.cfg"
 
 typedef struct {
     char match[64];
@@ -38,8 +38,8 @@ typedef struct {
     char username[32];
     char nickname[32];
     char channel_name[32];
-    bot_config_reply replies[32]; // TODO: increase max number or allocate in heap
-    unsigned int num_replies;
+    size_t num_replies;
+    bot_config_reply replies[];
 } bot_config;
 
 int create_connection(const char address[], const char port[]) {
@@ -279,7 +279,7 @@ void handle_line(int sockfd, char line[], bot_config *config) {
     } else if (strcmp(command, "PRIVMSG") == 0) { // 0: target, 1: message
         if (*paramv[0] != '#') return; // only responsd to channel messages
 
-        for (int i = 0; i < config->num_replies; ++i) {
+        for (unsigned int i = 0; i < config->num_replies; ++i) {
             if (strncasecmp(paramv[1], config->replies[i].match, strlen(config->replies[i].match)) == 0) {
                 snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", paramv[0], config->replies[i].reply);
                 send = true;
@@ -362,7 +362,7 @@ char* get_lines(int sockfd) {
         total_recv_bytes += recv_bytes;
 
         // Received messages should always end in CRLF
-        recv_ok = recv_bytes >= 2 &&
+        recv_ok = total_recv_bytes >= 2 &&
                   recv_buffer[total_recv_bytes - 2] == '\r' &&
                   recv_buffer[total_recv_bytes - 1] == '\n';
     }
@@ -417,7 +417,35 @@ bool load_config(const char filename[], bot_config **config) {
         return false;
     }
 
-    *config = malloc(sizeof(**config));
+    unsigned int replies_count = 0;
+    config_setting_t *reply_cfg = config_lookup(&cfg_file, "replies");
+
+    if (reply_cfg == NULL) {
+        *config = malloc(sizeof(**config));
+    } else {
+        unsigned int reply_cfg_count = config_setting_length(reply_cfg);
+        *config = malloc(sizeof(**config) + reply_cfg_count * sizeof((*config)->replies[0]));
+
+        for (unsigned int i = 0; i < reply_cfg_count; ++i) {
+            config_setting_t *reply_cfg_row = config_setting_get_elem(reply_cfg, i);
+            const char *match_str, *reply_str;
+
+            if (!(config_setting_lookup_string(reply_cfg_row, "match", &match_str) &&
+                  config_setting_lookup_string(reply_cfg_row, "reply", &reply_str))) {
+
+                printf("Ignored invalid row '%d' from reply config\n", i);
+                continue;
+            }
+
+            strcpy((*config)->replies[replies_count].match, match_str);
+            strcpy((*config)->replies[replies_count].reply, reply_str);
+            replies_count++;
+        }
+    }
+
+    (*config)->num_replies = replies_count;
+    printf("Loaded %u replies from the config\n", replies_count);
+
     bool load_ok = true;
 
     if (!load_config_value(&cfg_file, "server_address", (*config)->server_address)) {
@@ -436,32 +464,6 @@ bool load_config(const char filename[], bot_config **config) {
         load_ok = false;
     }
 
-    unsigned int replies_count = 0;
-    config_setting_t *reply_cfg = config_lookup(&cfg_file, "replies");
-
-    if (reply_cfg != NULL) {
-        unsigned int reply_cfg_count = config_setting_length(reply_cfg);
-
-        for (int i = 0; i < reply_cfg_count; ++i) {
-            config_setting_t *reply_cfg_row = config_setting_get_elem(reply_cfg, i);
-            const char *match_str, *reply_str;
-
-            if (!(config_setting_lookup_string(reply_cfg_row, "match", &match_str) &&
-                  config_setting_lookup_string(reply_cfg_row, "reply", &reply_str))) {
-
-                printf("Ignored invalid row '%d' from reply config\n", i);
-                continue;
-            }
-
-            strcpy((*config)->replies[replies_count].match, match_str);
-            strcpy((*config)->replies[replies_count].reply, reply_str);
-            replies_count++;
-        }
-    }
-
-    (*config)->num_replies = replies_count;
-    printf("Loaded %u replies from the config file\n", replies_count);
-
     config_destroy(&cfg_file);
     return load_ok;
 }
@@ -471,6 +473,8 @@ int main() {
     if (!load_config(CONFIG_FILE, &botcfg)) {
         free(botcfg);
         return 1;
+    } else {
+        printf("Config file '%s' loaded successfully\n", CONFIG_FILE);
     }
 
     #ifdef USE_SSL
@@ -485,8 +489,8 @@ int main() {
     while (true) { // connection initiation
         int sockfd = -1;
         if ((sockfd = create_connection(botcfg->server_address, botcfg->server_port)) == -1) {
-            printf("Failed to connect, waiting for %d seconds and trying again\n", RETRY_INTERVAL);
-            sleep(RETRY_INTERVAL);
+            printf("Failed to connect, waiting for %d seconds and trying again\n", RECONNECT_INTERVAL);
+            sleep(RECONNECT_INTERVAL);
             continue;
         } else {
             printf("Connection ok\n");
@@ -547,8 +551,8 @@ int main() {
 
         close(sockfd);
 
-        printf("Connection was lost, trying to reconnect after %d seconds\n", RETRY_INTERVAL);
-        sleep(RETRY_INTERVAL);
+        printf("Connection was lost, trying to reconnect after %d seconds\n", RECONNECT_INTERVAL);
+        sleep(RECONNECT_INTERVAL);
     }
 
     printf("Cleaning up resources and exiting\n");

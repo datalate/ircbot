@@ -7,7 +7,7 @@ OBJ = $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 OUT = $(BIN_DIR)/bot
 
 CC      = gcc
-CFLAGS  = -Wall -g
+CFLAGS  = -Wall -Wextra -g
 LDLIBS  = -lssl -lcrypto -lconfig++
 
 all: $(OUT)
