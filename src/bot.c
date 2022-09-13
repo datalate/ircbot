@@ -299,6 +299,9 @@ void handle_line(int sockfd, char line[], bot_config *config) {
             snprintf(response, BUFFER_SIZE, "JOIN %s", paramv[0]); // re-join
             send = true;
         }
+    } else if (strcmp(command, "433") == 0) { // nick in use
+        snprintf(response, BUFFER_SIZE, "NICK %s_", config->nickname);
+        send = true;
     } else if (strcmp(command, "376") == 0 || strcmp(command, "422") == 0) { // end of motd
         snprintf(response, BUFFER_SIZE, "JOIN %s", config->channel_name);
         send = true;
