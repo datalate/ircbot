@@ -11,8 +11,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
-#include <signal.h>
-#include <libconfig.h>
+
+#include "config.h"
 
 #ifdef USE_SSL
 #include <openssl/bio.h>
@@ -26,97 +26,6 @@
 #define BUFFER_SIZE         512
 #define RECONNECT_INTERVAL  60
 #define CONFIG_FILE         "bot.cfg"
-
-typedef struct {
-    char match[64];
-    char reply[128];
-} bot_config_reply;
-
-typedef struct {
-    char server_address[64];
-    char server_port[10];
-    char username[16];
-    char nickname[16]; // NICKLEN = 9
-    char channel_name[64]; // CHANNELLEN=50
-    char admin_hostname[64];
-    size_t num_replies;
-    bot_config_reply replies[];
-} bot_config;
-
-bool load_config_value(config_t *cfg, const char name[], char* result) {
-    const char *tmp_str;
-
-    if (!config_lookup_string(cfg, name, &tmp_str)) {
-        printf("Configuration missing for field '%s'\n", name);
-        return false;
-    }
-
-    strcpy(result, tmp_str);
-    return true;
-}
-
-bool load_config(const char filename[], bot_config **config) {
-    config_t cfg_file;
-    config_init(&cfg_file);
-    bot_config *new_config;
-
-    if (!config_read_file(&cfg_file, filename)) {
-        fprintf(stderr, "Loading config '%s' failed with code %d (%s)\n", filename,
-                config_error_line(&cfg_file), config_error_text(&cfg_file));
-
-        config_destroy(&cfg_file);
-
-        return false;
-    }
-
-    unsigned int replies_count = 0;
-    config_setting_t *reply_cfg = config_lookup(&cfg_file, "replies");
-
-    if (reply_cfg == NULL) {
-        new_config = malloc(sizeof(*new_config));
-    } else {
-        unsigned int reply_cfg_count = config_setting_length(reply_cfg);
-        new_config = malloc(sizeof(*new_config) + reply_cfg_count * sizeof(new_config->replies[0]));
-
-        for (unsigned int i = 0; i < reply_cfg_count; ++i) {
-            config_setting_t *reply_cfg_row = config_setting_get_elem(reply_cfg, i);
-            const char *match_str, *reply_str;
-
-            if (!(config_setting_lookup_string(reply_cfg_row, "match", &match_str) &&
-                  config_setting_lookup_string(reply_cfg_row, "reply", &reply_str))) {
-
-                printf("Ignored invalid row '%d' from reply config\n", i);
-                continue;
-            }
-
-            strcpy(new_config->replies[replies_count].match, match_str);
-            strcpy(new_config->replies[replies_count].reply, reply_str);
-            replies_count++;
-        }
-    }
-
-    new_config->num_replies = replies_count;
-    printf("Loaded %u replies from the config\n", replies_count);
-
-    bool load_ok =
-        load_config_value(&cfg_file, "server_address", new_config->server_address) &&
-        load_config_value(&cfg_file, "server_port", new_config->server_port) &&
-        load_config_value(&cfg_file, "username", new_config->username) &&
-        load_config_value(&cfg_file, "nickname", new_config->nickname) &&
-        load_config_value(&cfg_file, "channel_name", new_config->channel_name) &&
-        load_config_value(&cfg_file, "admin_hostname", new_config->admin_hostname);
-
-    if (load_ok) {
-        if ((*config) != NULL)
-            free(*config);
-        *config = new_config;
-    } else {
-        free(new_config);
-    }
-
-    config_destroy(&cfg_file);
-    return load_ok;
-}
 
 int create_connection(const char address[], const char port[]) {
     struct addrinfo hints, *result = NULL, *rp = NULL;
@@ -499,8 +408,6 @@ int main() {
     bot_config *botcfg = NULL;
     if (!load_config(CONFIG_FILE, &botcfg)) {
         return 1;
-    } else {
-        printf("Config file '%s' loaded successfully\n", CONFIG_FILE);
     }
 
     #ifdef USE_SSL

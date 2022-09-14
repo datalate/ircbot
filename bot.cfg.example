@@ -1,9 +1,12 @@
-server_address = "irc.quakenet.org";
-server_port = "6667";
-username = "ircbot";
-nickname = "unique_bot_name";
-channel_name = "#bot_testing";
-admin_hostname = "localhost";
+general = {
+    server_address = "irc.quakenet.org";
+    server_port = "6667";
+    use_ssl = false;
+    username = "ircbot";
+    nickname = "unique_bot_name";
+    channel_name = "#bot_testing";
+    admin_hostname = "localhost";
+};
 
 replies = (
   { match = "!google"; reply = "https://google.com"; }
