@@ -6,12 +6,17 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <time.h>
 #include <openssl/ssl.h>
 
 #include "common.h"
 #include "config.h"
 #include "connection.h"
 #include "ssl_connection.h"
+
+typedef struct {
+    struct timespec start_time;
+} bot_data;
 
 // <message>  ::= [':' <prefix> <SPACE> ] <command> <params> <crlf>
 // <prefix>   ::= <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
@@ -25,7 +30,7 @@
 //                  NUL or CR or LF>
 //
 // <crlf>     ::= CR LF
-char* handle_line(char line[], bot_config **config) {
+char* handle_line(char line[], bot_config **config, bot_data *data) {
     if (*line == '\0') return NULL;
 
     char *tok = line;
@@ -80,6 +85,18 @@ char* handle_line(char line[], bot_config **config) {
 
         if (is_admin && strcasecmp(paramv[1], "!reload") == 0) {
             load_config(CONFIG_FILE, config);
+        } else if (strcasecmp(paramv[1], "!uptime") == 0) {
+            struct timespec current_time;
+
+            clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+            int seconds_passed = current_time.tv_sec - data->start_time.tv_sec;
+            int minutes = seconds_passed / 60;
+            int seconds = seconds_passed % 60;
+            int hours = minutes / 60;
+            minutes = minutes % 60;;
+
+            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Current uptime: %02d:%02d:%02d", paramv[0], hours, minutes, seconds);
+            send = true;
         } else {
             for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
                 if (strcasecmp(paramv[1], (*config)->replies[i].match) == 0) {
@@ -124,22 +141,25 @@ char* get_auth_msg(bot_config *config) {
     snprintf(auth_msg, BUFFER_SIZE, "USER %s 0 * :%s\r\nNICK %s",
              config->username, config->username, config->nickname);
 
-	return strdup(auth_msg);
+    return strdup(auth_msg);
 }
 
 int main() {
     bot_config *botcfg = NULL;
     SSL_CTX *ssl_ctx = NULL;
     SSL *ssl = NULL;
+    bot_data botdata;
+
+    clock_gettime(CLOCK_MONOTONIC_RAW, &botdata.start_time);
 
     if (!load_config(CONFIG_FILE, &botcfg)) {
         return 1;
     }
 
-    bool use_ssl = botcfg->use_ssl; // cannot be reloaded from config
-
     while (true) { // connection initiation
+        bool use_ssl = botcfg->use_ssl; // cannot be reloaded from config
         int sockfd = -1;
+
         if ((sockfd = create_connection(botcfg->server_address, botcfg->server_port)) == -1) {
             printf("Failed to connect, waiting for %d seconds and trying again\n", RECONNECT_INTERVAL);
             sleep(RECONNECT_INTERVAL);
@@ -193,7 +213,7 @@ int main() {
             char *tok = lines;
 
             while ((line = strsep(&tok, "\r\n")) != NULL) {
-                char *reply = handle_line(line, &botcfg);
+                char *reply = handle_line(line, &botcfg, &botdata);
                 if (reply != NULL) {
                     if (use_ssl) ssl_send_msg(ssl, reply); else send_msg(sockfd, reply);
                     free(reply);
