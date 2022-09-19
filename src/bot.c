@@ -16,7 +16,59 @@
 
 typedef struct {
     struct timespec start_time;
+    SSL_CTX *ssl_ctx;
+    SSL *ssl;
+    int sockfd;
+    bool use_ssl;
 } bot_data;
+
+void send_message(bot_data *data, const char msg[]) {
+    if (data->use_ssl)
+        ssl_send_msg(data->ssl, msg);
+    else
+        send_msg(data->sockfd, msg);
+}
+
+bool init_ssl(bot_data *data, const char server_address[]) {
+    if (data->ssl_ctx == NULL && (data->ssl_ctx = create_ssl_context()) == NULL) {
+        printf("Failed to create SSL context\n");
+        return false;
+    }
+
+    if (data->ssl == NULL && (data->ssl = SSL_new(data->ssl_ctx)) == NULL) {
+        printf("SSL_new() failed\n");
+        return false;
+    } else if (SSL_clear(data->ssl) == 0) {
+        printf("SSL_clear() failed\n");
+        return false;
+    }
+
+    if (SSL_set_fd(data->ssl, data->sockfd) == 0) {
+        printf("SSL_set_fd() failed\n");
+        return false;
+    }
+
+    if (SSL_connect(data->ssl) != 1) {
+        printf("SSL_connect() failed\n");
+        return false;
+    }
+
+    printf("SSL initialized\n");
+
+    if (!check_cert(data->ssl, server_address)) {
+        return false;
+    }
+
+    return true;
+}
+
+void cleanup(bot_data *data) {
+    if (data->ssl != NULL)
+        SSL_free(data->ssl);
+
+    if (data->ssl_ctx != NULL)
+        SSL_CTX_free(data->ssl_ctx);
+}
 
 // <message>  ::= [':' <prefix> <SPACE> ] <command> <params> <crlf>
 // <prefix>   ::= <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
@@ -30,8 +82,8 @@ typedef struct {
 //                  NUL or CR or LF>
 //
 // <crlf>     ::= CR LF
-char* handle_line(char line[], bot_config **config, bot_data *data) {
-    if (*line == '\0') return NULL;
+void handle_line(char line[], bot_config **config, bot_data *data) {
+    if (*line == '\0') return;
 
     char *tok = line;
     char response[BUFFER_SIZE];
@@ -79,7 +131,7 @@ char* handle_line(char line[], bot_config **config, bot_data *data) {
         snprintf(response, BUFFER_SIZE, "PONG %s", params);
         send = true;
     } else if (strcmp(command, "PRIVMSG") == 0) { // 0: target, 1: message
-        if (*paramv[0] != '#') return NULL; // only respond to channel messages
+        if (*paramv[0] != '#') return; // only respond to channel messages
 
         bool is_admin = strcmp(host, (*config)->admin_hostname) == 0;
 
@@ -93,7 +145,7 @@ char* handle_line(char line[], bot_config **config, bot_data *data) {
             int minutes = seconds_passed / 60;
             int seconds = seconds_passed % 60;
             int hours = minutes / 60;
-            minutes = minutes % 60;;
+            minutes = minutes % 60;
 
             snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Current uptime: %02d:%02d:%02d", paramv[0], hours, minutes, seconds);
             send = true;
@@ -108,12 +160,12 @@ char* handle_line(char line[], bot_config **config, bot_data *data) {
         }
     } else if (strcmp(command, "MODE") == 0) { // 0: target, 1: mode
     } else if (strcmp(command, "INVITE") == 0) { // 0: target, 1: channel
-        if (*paramv[1] != '#') return NULL;
+        if (*paramv[1] != '#') return;
 
         snprintf(response, BUFFER_SIZE, "JOIN %s", paramv[1]);
         send = true;
     } else if (strcmp(command, "KICK") == 0) { // 0: channel, 1: nick, 2: reason
-        if (*paramv[0] != '#') return NULL;
+        if (*paramv[0] != '#') return;
 
         // TODO: compare to current nick instead of nick in config
         if (strcasecmp(paramv[1], (*config)->nickname) == 0) { // bot kicked
@@ -128,11 +180,8 @@ char* handle_line(char line[], bot_config **config, bot_data *data) {
         send = true;
     }
 
-    if (send) {
-        return strdup(response);
-    } else {
-        return NULL;
-    }
+    if (send)
+        send_message(data, response);
 }
 
 char* get_auth_msg(bot_config *config) {
@@ -146,9 +195,10 @@ char* get_auth_msg(bot_config *config) {
 
 int main() {
     bot_config *botcfg = NULL;
-    SSL_CTX *ssl_ctx = NULL;
-    SSL *ssl = NULL;
+
     bot_data botdata;
+    botdata.ssl = NULL;
+    botdata.ssl_ctx = NULL;
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &botdata.start_time);
 
@@ -157,10 +207,10 @@ int main() {
     }
 
     while (true) { // connection initiation
-        bool use_ssl = botcfg->use_ssl; // cannot be reloaded from config
-        int sockfd = -1;
+        botdata.use_ssl = botcfg->use_ssl; // cannot be reloaded from config
+        botdata.sockfd = -1;
 
-        if ((sockfd = create_connection(botcfg->server_address, botcfg->server_port)) == -1) {
+        if ((botdata.sockfd = create_connection(botcfg->server_address, botcfg->server_port)) == -1) {
             printf("Failed to connect, waiting for %d seconds and trying again\n", RECONNECT_INTERVAL);
             sleep(RECONNECT_INTERVAL);
             continue;
@@ -168,62 +218,29 @@ int main() {
             printf("Connection ok\n");
         }
 
-        if (use_ssl) {
-            if (ssl_ctx == NULL && (ssl_ctx = create_ssl_context()) == NULL) {
-                printf("Failed to create SSL context\n");
-                break;
-            }
-
-            if (ssl == NULL && (ssl = SSL_new(ssl_ctx)) == NULL) {
-                printf("SSL_new() failed\n");
-                break;
-            } else if (SSL_clear(ssl) == 0) {
-                printf("SSL_clear() failed\n");
-                break;
-            }
-
-            if (SSL_set_fd(ssl, sockfd) == 0) {
-                printf("SSL_set_fd() failed\n");
-                break;
-            }
-
-            if (SSL_connect(ssl) != 1) {
-                printf("SSL_connect() failed\n");
-                break;
-            }
-
-            printf("SSL initialized\n");
-
-            if (!check_cert(ssl, botcfg->server_address)) {
-                break;
-            }
-        }
+        if (botdata.use_ssl && !init_ssl(&botdata, botcfg->server_address))
+            break;
 
         char *auth_msg = get_auth_msg(botcfg);
-        if (use_ssl) ssl_send_msg(ssl, auth_msg); else send_msg(sockfd, auth_msg);
+        send_message(&botdata, auth_msg);
         free(auth_msg);
 
         while (true) { // connected to the server
             char *lines = NULL;
-            if (use_ssl) lines = ssl_get_lines(ssl); else lines = get_lines(sockfd);
+            if (botdata.use_ssl) lines = ssl_get_lines(botdata.ssl); else lines = get_lines(botdata.sockfd);
             
             if (lines == NULL) break; // disconnected
 
             char *line = NULL;
             char *tok = lines;
 
-            while ((line = strsep(&tok, "\r\n")) != NULL) {
-                char *reply = handle_line(line, &botcfg, &botdata);
-                if (reply != NULL) {
-                    if (use_ssl) ssl_send_msg(ssl, reply); else send_msg(sockfd, reply);
-                    free(reply);
-                }
-            }
+            while ((line = strsep(&tok, "\r\n")) != NULL)
+                handle_line(line, &botcfg, &botdata);
 
             free(lines);
         }
 
-        close(sockfd);
+        close(botdata.sockfd);
 
         printf("Connection was lost, trying to reconnect after %d seconds\n", RECONNECT_INTERVAL);
         sleep(RECONNECT_INTERVAL);
@@ -231,11 +248,7 @@ int main() {
 
     printf("Cleaning up resources and exiting\n");
 
-    if (ssl != NULL)
-        SSL_free(ssl);
-    if (ssl_ctx != NULL)
-        SSL_CTX_free(ssl_ctx);
-
+    cleanup(&botdata);
     free(botcfg);
 
     return 0;
