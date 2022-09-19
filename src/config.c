@@ -10,7 +10,7 @@ bool load_config_string(config_setting_t *cfg, const char name[], char* result) 
     const char *tmp_str;
 
     if (!config_setting_lookup_string(cfg, name, &tmp_str)) {
-        printf("Configuration missing for field '%s'\n", name);
+        fprintf(stderr, "Configuration missing for field '%s'\n", name);
         return false;
     }
 
@@ -22,7 +22,7 @@ bool load_config_bool(config_setting_t *cfg, const char name[], bool* result) {
     int tmp_int;
 
     if (!config_setting_lookup_bool(cfg, name, &tmp_int)) {
-        printf("Configuration missing for field '%s'\n", name);
+        fprintf(stderr, "Configuration missing for field '%s'\n", name);
         return false;
     }
 
@@ -100,7 +100,7 @@ bool load_config(const char filename[], bot_config **config) {
     } else {
         free(new_config);
 
-        printf("Failed to load config file\n");
+        fprintf(stderr, "Failed to load config file\n");
     }
 
     return load_ok;

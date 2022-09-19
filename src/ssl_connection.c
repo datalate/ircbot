@@ -21,14 +21,14 @@ SSL_CTX* create_ssl_context() {
     SSL_load_error_strings();
 
     if (SSL_library_init() < 0) {
-        printf("SSL_library_init() failed\n");
+        fprintf(stderr, "SSL_library_init() failed\n");
         return NULL;
     }
 
     const SSL_METHOD *method = SSLv23_client_method();
 
     if ((ctx = SSL_CTX_new(method)) == NULL) {
-        printf("SSL_CTX_new() failed\n");
+        fprintf(stderr, "SSL_CTX_new() failed\n");
         return NULL;
     }
 
@@ -37,7 +37,7 @@ SSL_CTX* create_ssl_context() {
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
 
     if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
-        printf("Failed to load CA paths\n");
+        fprintf(stderr, "Failed to load CA paths\n");
         SSL_CTX_free(ctx);
 
         return NULL;
@@ -51,7 +51,7 @@ bool check_cert(SSL *ssl, const char host[]) {
 
     long verify_result = 0;
     if ((verify_result = SSL_get_verify_result(ssl)) != X509_V_OK) {
-        printf("Couldn't verify host certificate: %ld\n", verify_result);
+        fprintf(stderr, "Couldn't verify host certificate: %ld\n", verify_result);
         return false;
     }
     
@@ -59,7 +59,7 @@ bool check_cert(SSL *ssl, const char host[]) {
     if (cert) X509_free(cert);
 
     if (cert == NULL) {
-        printf("Couldn't get host certificate\n");
+        fprintf(stderr, "Couldn't get host certificate\n");
         return false;
     }
 
@@ -74,7 +74,7 @@ bool check_cert(SSL *ssl, const char host[]) {
     X509_NAME_get_text_by_NID(subject_name, NID_commonName, host_CN, MAX_CN_LENGTH);
 
     if (strcasecmp(host_CN, host) != 0) {
-        printf("Common name '%s' does not match host name '%s'\n", host_CN, host);
+        fprintf(stderr, "Common name '%s' does not match host name '%s'\n", host_CN, host);
         return false;
     }
 
@@ -92,7 +92,7 @@ void ssl_send_msg(SSL *ssl, const char msg[]) {
         write_bytes = SSL_write(ssl, send_buffer + total_write_bytes, len - total_write_bytes);
         if (write_bytes <= 0) {
             int error_code = SSL_get_error(ssl, write_bytes);
-            printf("SSL_write() failed: %d\n", SSL_get_error(ssl, write_bytes));
+            fprintf(stderr, "SSL_write() failed: %d\n", SSL_get_error(ssl, write_bytes));
 
             write_bytes = 0;
             if (error_code == SSL_ERROR_WANT_WRITE) continue; else break;
@@ -110,7 +110,7 @@ void ssl_send_msg(SSL *ssl, const char msg[]) {
 char* ssl_get_lines(SSL *ssl) {
     char *recv_buffer = calloc(0, 1); // empty calloc to be able to call realloc later on
     if (recv_buffer == NULL) {
-        printf("calloc() failed\n");
+        fprintf(stderr, "calloc() failed\n");
         return NULL;
     }
 
@@ -121,7 +121,7 @@ char* ssl_get_lines(SSL *ssl) {
         char *tmp_ptr = realloc(recv_buffer, total_recv_bytes + BUFFER_SIZE + 1);
 
         if (tmp_ptr == NULL) {
-            printf("realloc() failed\n");
+            fprintf(stderr, "realloc() failed\n");
 
             free(recv_buffer);
             break;
@@ -132,7 +132,7 @@ char* ssl_get_lines(SSL *ssl) {
 
         if ((recv_bytes = SSL_read(ssl, recv_buffer + total_recv_bytes, BUFFER_SIZE)) <= 0) {
             int error_code = SSL_get_error(ssl, recv_bytes);
-            printf("SSL_read() failed: %d\n", error_code);
+            fprintf(stderr, "SSL_read() failed: %d\n", error_code);
             recv_bytes = 0;
 
             if (error_code == SSL_ERROR_WANT_READ) continue; else break;

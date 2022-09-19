@@ -14,6 +14,8 @@
 #include "connection.h"
 #include "ssl_connection.h"
 
+#define RECONNECT_INTERVAL 60
+
 typedef struct {
     struct timespec start_time;
     SSL_CTX *ssl_ctx;
@@ -89,25 +91,25 @@ void send_message(bot_data *data, const char msg[]) {
 
 bool init_ssl(bot_data *data, const char server_address[]) {
     if (data->ssl_ctx == NULL && (data->ssl_ctx = create_ssl_context()) == NULL) {
-        printf("Failed to create SSL context\n");
+        fprintf(stderr, "Failed to create SSL context\n");
         return false;
     }
 
     if (data->ssl == NULL && (data->ssl = SSL_new(data->ssl_ctx)) == NULL) {
-        printf("SSL_new() failed\n");
+        fprintf(stderr, "SSL_new() failed\n");
         return false;
     } else if (SSL_clear(data->ssl) == 0) {
-        printf("SSL_clear() failed\n");
+        fprintf(stderr, "SSL_clear() failed\n");
         return false;
     }
 
     if (SSL_set_fd(data->ssl, data->sockfd) == 0) {
-        printf("SSL_set_fd() failed\n");
+        fprintf(stderr, "SSL_set_fd() failed\n");
         return false;
     }
 
     if (SSL_connect(data->ssl) != 1) {
-        printf("SSL_connect() failed\n");
+        fprintf(stderr, "SSL_connect() failed\n");
         return false;
     }
 

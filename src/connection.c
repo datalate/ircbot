@@ -22,7 +22,7 @@ int create_connection(const char address[], const char port[]) {
     hints.ai_protocol = 0;
 
     if (getaddrinfo(address, port, &hints, &result) != 0) {
-        printf("getaddinfo() failed\n");
+        fprintf(stderr, "getaddinfo() failed\n");
         return -1;
     }
 
@@ -34,12 +34,12 @@ int create_connection(const char address[], const char port[]) {
         printf("Connecting to %s:%s\n", ipv4, port);
 
         if ((sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol)) == -1) {
-            printf("socket() failed\n");
+            fprintf(stderr, "socket() failed\n");
             continue;
         }
 
         if (connect(sockfd, rp->ai_addr, rp->ai_addrlen) == -1) {
-            printf("connect() failed\n");
+            fprintf(stderr, "connect() failed\n");
             close(sockfd);
             sockfd = -1;
             continue;
@@ -63,7 +63,7 @@ void send_msg(int sockfd, const char msg[]) {
     while (total_write_bytes != len) {
         write_bytes = write(sockfd, send_buffer + total_write_bytes, len - total_write_bytes);
         if (write_bytes == -1) {
-            printf("write() failed\n");
+            fprintf(stderr, "write() failed\n");
 
             break;
         }
@@ -80,7 +80,7 @@ void send_msg(int sockfd, const char msg[]) {
 char* get_lines(int sockfd) {
     char *recv_buffer = calloc(0, 1); // empty calloc to be able to call realloc later on
     if (recv_buffer == NULL) {
-        printf("calloc() failed\n");
+        fprintf(stderr, "calloc() failed\n");
         return NULL;
     }
 
@@ -91,7 +91,7 @@ char* get_lines(int sockfd) {
         char *tmp_ptr = realloc(recv_buffer, total_recv_bytes + BUFFER_SIZE + 1);
 
         if (tmp_ptr == NULL) {
-            printf("realloc() failed\n");
+            fprintf(stderr, "realloc() failed\n");
 
             free(recv_buffer);
             break;
@@ -101,7 +101,7 @@ char* get_lines(int sockfd) {
         memset(recv_buffer + total_recv_bytes, 0, BUFFER_SIZE + 1);
 
         if ((recv_bytes = read(sockfd, recv_buffer + total_recv_bytes, BUFFER_SIZE)) <= 0) {
-            printf("read() failed\n");
+            fprintf(stderr, "read() failed\n");
             break;
         }
 
