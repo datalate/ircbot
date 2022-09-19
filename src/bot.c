@@ -64,6 +64,7 @@ irc_message* parse_message(const char msg[]) {
                 strcpy(ircmsg->host, prefix_tok);
             }
         }
+
         free(prefix_tmp);
     }
 
@@ -226,6 +227,8 @@ void send_auth(bot_config *config, bot_data *data) {
 }
 
 void handle_connection(bot_config **config, bot_data *data) {
+    clock_gettime(CLOCK_MONOTONIC_RAW, &data->start_time);
+
     send_auth(*config, data);
 
     while (true) { // connected to the server
@@ -255,8 +258,6 @@ int main() {
     bot_data botdata;
     botdata.ssl = NULL;
     botdata.ssl_ctx = NULL;
-
-    clock_gettime(CLOCK_MONOTONIC_RAW, &botdata.start_time);
 
     if (!load_config(CONFIG_FILE, &botcfg)) {
         return 1;
