@@ -32,14 +32,18 @@ typedef struct { // TODO: check lengths
     char user[16]; // parsed from prefix
     char host[64]; // parsed from prefix
     int paramc;
-    char *paramv[15]; // parsed from params
+    char *paramv[15];
 } irc_message;
 
-irc_message parse_message(const char msg[]) {
-    irc_message ircmsg;
-    ircmsg.paramc = 0;
-    for (int c = 0; c < 16; ++c)
-        ircmsg.paramv[c] = NULL;
+irc_message* parse_message(const char msg[]) {
+    irc_message *ircmsg = malloc(sizeof(*ircmsg));
+    if (ircmsg == NULL) {
+        return NULL;
+    }
+
+    ircmsg->paramc = 0;
+    for (int c = 0; c < 15; ++c)
+        ircmsg->paramv[c] = NULL;
 
     printf("RECV: %s\n", msg);
 
@@ -48,31 +52,32 @@ irc_message parse_message(const char msg[]) {
 
     if (*tok == ':') {
         // <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
-        strcpy(ircmsg.prefix, strsep(&tok, " ") + 1);
+        strcpy(ircmsg->prefix, strsep(&tok, " ") + 1);
 
-        char *prefix_tmp = strdup(ircmsg.prefix);
+        char *prefix_tmp = strdup(ircmsg->prefix);
         char *prefix_tok = prefix_tmp;
 
-        strcpy(ircmsg.nick, strsep(&prefix_tok, "!"));
+        strcpy(ircmsg->nick, strsep(&prefix_tok, "!"));
         if (prefix_tok != NULL) {
-            strcpy(ircmsg.user, strsep(&prefix_tok, "@"));
+            strcpy(ircmsg->user, strsep(&prefix_tok, "@"));
             if (prefix_tok != NULL) {
-                strcpy(ircmsg.host, prefix_tok);
+                strcpy(ircmsg->host, prefix_tok);
             }
         }
         free(prefix_tmp);
     }
 
-    strcpy(ircmsg.command, strsep(&tok, " "));
-    strcpy(ircmsg.params, tok);
+    strcpy(ircmsg->command, strsep(&tok, " "));
+    strcpy(ircmsg->params, tok);
 
+    tok = ircmsg->params;
     while (tok != NULL) {
         if (*tok == ':') {
-            ircmsg.paramv[ircmsg.paramc++] = tok + 1;
+            ircmsg->paramv[ircmsg->paramc++] = tok + 1;
             break;
         }
 
-        ircmsg.paramv[ircmsg.paramc++] = strsep(&tok, " ");
+        ircmsg->paramv[ircmsg->paramc++] = strsep(&tok, " ");
     }
 
     free(msg_tmp);
@@ -145,25 +150,25 @@ void cleanup(bot_data *data) {
 void handle_line(const char line[], bot_config **config, bot_data *data) {
     if (*line == '\0') return;
 
-    irc_message msg = parse_message(line);
+    irc_message *msg = parse_message(line);
 
     char response[BUFFER_SIZE];
     bool send = false;
 
-    if (strcmp(msg.command, "PING") == 0) { // 0: ping
-        snprintf(response, BUFFER_SIZE, "PONG %s", msg.params);
+    if (strcmp(msg->command, "PING") == 0) { // 0: ping
+        snprintf(response, BUFFER_SIZE, "PONG %s", msg->params);
         send = true;
-    } else if (strcmp(msg.command, "PRIVMSG") == 0) { // 0: target, 1: message
-        if (*msg.paramv[0] != '#') return; // only respond to channel messages
+    } else if (strcmp(msg->command, "PRIVMSG") == 0) { // 0: target, 1: message
+        if (*msg->paramv[0] != '#') return; // only respond to channel messages
 
-        bool is_admin = strcmp(msg.host, (*config)->admin_hostname) == 0;
+        bool is_admin = strcmp(msg->host, (*config)->admin_hostname) == 0;
 
-        if (is_admin && strcasecmp(msg.paramv[1], "!reload") == 0) {
+        if (is_admin && strcasecmp(msg->paramv[1], "!reload") == 0) {
             load_config(CONFIG_FILE, config);
-        } else if (is_admin && strcasecmp(msg.paramv[1], "!reconnect") == 0) {
+        } else if (is_admin && strcasecmp(msg->paramv[1], "!reconnect") == 0) {
             snprintf(response, BUFFER_SIZE, "QUIT");
             send = true;
-        } else if (strcasecmp(msg.paramv[1], "!uptime") == 0) {
+        } else if (strcasecmp(msg->paramv[1], "!uptime") == 0) {
             struct timespec current_time;
 
             clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
@@ -173,38 +178,40 @@ void handle_line(const char line[], bot_config **config, bot_data *data) {
             int hours = minutes / 60;
             minutes = minutes % 60;
 
-            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Current uptime: %02d:%02d:%02d", msg.paramv[0], hours, minutes, seconds);
+            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Current uptime: %02d:%02d:%02d", msg->paramv[0], hours, minutes, seconds);
             send = true;
         } else {
             for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
-                if (strcasecmp(msg.paramv[1], (*config)->replies[i].match) == 0) {
-                    snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg.paramv[0], (*config)->replies[i].reply);
+                if (strcasecmp(msg->paramv[1], (*config)->replies[i].match) == 0) {
+                    snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], (*config)->replies[i].reply);
                     send = true;
                     break;
                 }
             }
         }
-    } else if (strcmp(msg.command, "MODE") == 0) { // 0: target, 1: mode
-    } else if (strcmp(msg.command, "INVITE") == 0) { // 0: target, 1: channel
-        if (*msg.paramv[1] != '#') return;
+    } else if (strcmp(msg->command, "MODE") == 0) { // 0: target, 1: mode
+    } else if (strcmp(msg->command, "INVITE") == 0) { // 0: target, 1: channel
+        if (*msg->paramv[1] != '#') return;
 
-        snprintf(response, BUFFER_SIZE, "JOIN %s", msg.paramv[1]);
+        snprintf(response, BUFFER_SIZE, "JOIN %s", msg->paramv[1]);
         send = true;
-    } else if (strcmp(msg.command, "KICK") == 0) { // 0: channel, 1: nick, 2: reason
-        if (*msg.paramv[0] != '#') return;
+    } else if (strcmp(msg->command, "KICK") == 0) { // 0: channel, 1: nick, 2: reason
+        if (*msg->paramv[0] != '#') return;
 
         // TODO: compare to current nick instead of nick in config
-        if (strcasecmp(msg.paramv[1], (*config)->nickname) == 0) { // bot kicked
-            snprintf(response, BUFFER_SIZE, "JOIN %s", msg.paramv[0]); // re-join
+        if (strcasecmp(msg->paramv[1], (*config)->nickname) == 0) { // bot kicked
+            snprintf(response, BUFFER_SIZE, "JOIN %s", msg->paramv[0]); // re-join
             send = true;
         }
-    } else if (strcmp(msg.command, "433") == 0) { // nick in use
+    } else if (strcmp(msg->command, "433") == 0) { // nick in use
         snprintf(response, BUFFER_SIZE, "NICK %s_", (*config)->nickname);
         send = true;
-    } else if (strcmp(msg.command, "376") == 0 || strcmp(msg.command, "422") == 0) { // end of motd
+    } else if (strcmp(msg->command, "376") == 0 || strcmp(msg->command, "422") == 0) { // end of motd
         snprintf(response, BUFFER_SIZE, "JOIN %s", (*config)->channel_name);
         send = true;
     }
+
+    free(msg);
 
     if (send)
         send_message(data, response);
@@ -273,8 +280,7 @@ int main() {
 
         handle_connection(&botcfg, &botdata);
 
-        printf("Connection was lost, trying to reconnect after %d seconds\n", RECONNECT_INTERVAL);
-        sleep(RECONNECT_INTERVAL);
+        printf("Connection was lost, trying to reconnect...\n");
     }
 
     printf("Cleaning up resources and exiting\n");
