@@ -160,6 +160,9 @@ void handle_line(const char line[], bot_config **config, bot_data *data) {
 
         if (is_admin && strcasecmp(msg.paramv[1], "!reload") == 0) {
             load_config(CONFIG_FILE, config);
+        } else if (is_admin && strcasecmp(msg.paramv[1], "!reconnect") == 0) {
+            snprintf(response, BUFFER_SIZE, "QUIT");
+            send = true;
         } else if (strcasecmp(msg.paramv[1], "!uptime") == 0) {
             struct timespec current_time;
 
@@ -207,13 +210,37 @@ void handle_line(const char line[], bot_config **config, bot_data *data) {
         send_message(data, response);
 }
 
-char* get_auth_msg(bot_config *config) {
+void send_auth(bot_config *config, bot_data *data) {
     char auth_msg[BUFFER_SIZE];
 
     snprintf(auth_msg, BUFFER_SIZE, "USER %s 0 * :%s\r\nNICK %s",
              config->username, config->username, config->nickname);
 
-    return strdup(auth_msg);
+    send_message(data, auth_msg);
+}
+
+void handle_connection(bot_config **config, bot_data *data) {
+    send_auth(*config, data);
+
+    while (true) { // connected to the server
+        char *lines = NULL;
+        if (data->use_ssl)
+            lines = ssl_get_lines(data->ssl);
+        else
+            lines = get_lines(data->sockfd);
+
+        if (lines == NULL) break; // disconnected
+
+        char *line = NULL;
+        char *tok = lines;
+
+        while ((line = strsep(&tok, "\r\n")) != NULL)
+            handle_line(line, config, data);
+
+        free(lines);
+    }
+
+    close(data->sockfd);
 }
 
 int main() {
@@ -244,26 +271,7 @@ int main() {
         if (botdata.use_ssl && !init_ssl(&botdata, botcfg->server_address))
             break;
 
-        char *auth_msg = get_auth_msg(botcfg);
-        send_message(&botdata, auth_msg);
-        free(auth_msg);
-
-        while (true) { // connected to the server
-            char *lines = NULL;
-            if (botdata.use_ssl) lines = ssl_get_lines(botdata.ssl); else lines = get_lines(botdata.sockfd);
-            
-            if (lines == NULL) break; // disconnected
-
-            char *line = NULL;
-            char *tok = lines;
-
-            while ((line = strsep(&tok, "\r\n")) != NULL)
-                handle_line(line, &botcfg, &botdata);
-
-            free(lines);
-        }
-
-        close(botdata.sockfd);
+        handle_connection(&botcfg, &botdata);
 
         printf("Connection was lost, trying to reconnect after %d seconds\n", RECONNECT_INTERVAL);
         sleep(RECONNECT_INTERVAL);
