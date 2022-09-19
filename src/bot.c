@@ -82,9 +82,6 @@ irc_message* parse_message(const char msg[]) {
 
     free(msg_tmp);
     return ircmsg;
-
-    //for(int i = 0; i < paramc; ++i) { printf("%d: %s ", i, paramv[i]); }
-    //  printf("\n");
 }
 
 void send_message(bot_data *data, const char msg[]) {
@@ -164,9 +161,11 @@ void handle_line(const char line[], bot_config **config, bot_data *data) {
         bool is_admin = strcmp(msg->host, (*config)->admin_hostname) == 0;
 
         if (is_admin && strcasecmp(msg->paramv[1], "!reload") == 0) {
+            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Config file reloaded", msg->paramv[0]);
             load_config(CONFIG_FILE, config);
+            send = true;
         } else if (is_admin && strcasecmp(msg->paramv[1], "!reconnect") == 0) {
-            snprintf(response, BUFFER_SIZE, "QUIT");
+            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :See you soon! :)\r\nQUIT", msg->paramv[0]);
             send = true;
         } else if (strcasecmp(msg->paramv[1], "!uptime") == 0) {
             struct timespec current_time;
