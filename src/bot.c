@@ -22,6 +22,64 @@ typedef struct {
     bool use_ssl;
 } bot_data;
 
+typedef struct { // TODO: check lengths
+    char prefix[256];
+    char command[32];
+    char params[500];
+    char nick[16]; // parsed from prefix
+    char user[16]; // parsed from prefix
+    char host[64]; // parsed from prefix
+    int paramc;
+    char *paramv[15]; // parsed from params
+} irc_message;
+
+irc_message parse_message(const char msg[]) {
+    irc_message ircmsg;
+    ircmsg.paramc = 0;
+    for (int c = 0; c < 16; ++c)
+        ircmsg.paramv[c] = NULL;
+
+    printf("RECV: %s\n", msg);
+
+    char *msg_tmp = strdup(msg);
+    char *tok = msg_tmp;
+
+    if (*tok == ':') {
+        // <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
+        strcpy(ircmsg.prefix, strsep(&tok, " ") + 1);
+
+        char *prefix_tmp = strdup(ircmsg.prefix);
+        char *prefix_tok = prefix_tmp;
+
+        strcpy(ircmsg.nick, strsep(&prefix_tok, "!"));
+        if (prefix_tok != NULL) {
+            strcpy(ircmsg.user, strsep(&prefix_tok, "@"));
+            if (prefix_tok != NULL) {
+                strcpy(ircmsg.host, prefix_tok);
+            }
+        }
+        free(prefix_tmp);
+    }
+
+    strcpy(ircmsg.command, strsep(&tok, " "));
+    strcpy(ircmsg.params, tok);
+
+    while (tok != NULL) {
+        if (*tok == ':') {
+            ircmsg.paramv[ircmsg.paramc++] = tok + 1;
+            break;
+        }
+
+        ircmsg.paramv[ircmsg.paramc++] = strsep(&tok, " ");
+    }
+
+    free(msg_tmp);
+    return ircmsg;
+
+    //for(int i = 0; i < paramc; ++i) { printf("%d: %s ", i, paramv[i]); }
+    //  printf("\n");
+}
+
 void send_message(bot_data *data, const char msg[]) {
     if (data->use_ssl)
         ssl_send_msg(data->ssl, msg);
@@ -82,62 +140,25 @@ void cleanup(bot_data *data) {
 //                  NUL or CR or LF>
 //
 // <crlf>     ::= CR LF
-void handle_line(char line[], bot_config **config, bot_data *data) {
+void handle_line(const char line[], bot_config **config, bot_data *data) {
     if (*line == '\0') return;
 
-    char *tok = line;
+    irc_message msg = parse_message(line);
+
     char response[BUFFER_SIZE];
-    char prefix[256], command[32], params[500]; // TODO: check lengths
-    char nick[16], user[16], host[64]; // NICKLEN=9
-    char *paramv[15];
-    int paramc = 0;
-
-    printf("RECV: %s\n", line);
-
-    if (*tok == ':') {
-        // <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
-        strcpy(prefix, strsep(&tok, " ") + 1);
-
-        char *prefix_tmp = strdup(prefix);
-        char *prefix_tok = prefix_tmp;
-
-        strcpy(nick, strsep(&prefix_tok, "!"));
-        if (prefix_tok != NULL) {
-            strcpy(user, strsep(&prefix_tok, "@"));
-            if (prefix_tok != NULL) {
-                strcpy(host, prefix_tok);
-            }
-        }
-        free(prefix_tmp);
-    }
-
-    strcpy(command, strsep(&tok, " "));
-    strcpy(params, tok);
-
-    while (tok != NULL) {
-        if (*tok == ':') {
-            paramv[paramc++] = tok + 1;
-            break;
-        }
-
-        paramv[paramc++] = strsep(&tok, " ");
-    }
-
-    //for(int i = 0; i < paramc; ++i) { printf("%d: %s ", i, paramv[i]); }
-    //  printf("\n");
-
     bool send = false;
-    if (strcmp(command, "PING") == 0) { // 0: ping
-        snprintf(response, BUFFER_SIZE, "PONG %s", params);
+
+    if (strcmp(msg.command, "PING") == 0) { // 0: ping
+        snprintf(response, BUFFER_SIZE, "PONG %s", msg.params);
         send = true;
-    } else if (strcmp(command, "PRIVMSG") == 0) { // 0: target, 1: message
-        if (*paramv[0] != '#') return; // only respond to channel messages
+    } else if (strcmp(msg.command, "PRIVMSG") == 0) { // 0: target, 1: message
+        if (*msg.paramv[0] != '#') return; // only respond to channel messages
 
-        bool is_admin = strcmp(host, (*config)->admin_hostname) == 0;
+        bool is_admin = strcmp(msg.host, (*config)->admin_hostname) == 0;
 
-        if (is_admin && strcasecmp(paramv[1], "!reload") == 0) {
+        if (is_admin && strcasecmp(msg.paramv[1], "!reload") == 0) {
             load_config(CONFIG_FILE, config);
-        } else if (strcasecmp(paramv[1], "!uptime") == 0) {
+        } else if (strcasecmp(msg.paramv[1], "!uptime") == 0) {
             struct timespec current_time;
 
             clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
@@ -147,35 +168,35 @@ void handle_line(char line[], bot_config **config, bot_data *data) {
             int hours = minutes / 60;
             minutes = minutes % 60;
 
-            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Current uptime: %02d:%02d:%02d", paramv[0], hours, minutes, seconds);
+            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Current uptime: %02d:%02d:%02d", msg.paramv[0], hours, minutes, seconds);
             send = true;
         } else {
             for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
-                if (strcasecmp(paramv[1], (*config)->replies[i].match) == 0) {
-                    snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", paramv[0], (*config)->replies[i].reply);
+                if (strcasecmp(msg.paramv[1], (*config)->replies[i].match) == 0) {
+                    snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg.paramv[0], (*config)->replies[i].reply);
                     send = true;
                     break;
                 }
             }
         }
-    } else if (strcmp(command, "MODE") == 0) { // 0: target, 1: mode
-    } else if (strcmp(command, "INVITE") == 0) { // 0: target, 1: channel
-        if (*paramv[1] != '#') return;
+    } else if (strcmp(msg.command, "MODE") == 0) { // 0: target, 1: mode
+    } else if (strcmp(msg.command, "INVITE") == 0) { // 0: target, 1: channel
+        if (*msg.paramv[1] != '#') return;
 
-        snprintf(response, BUFFER_SIZE, "JOIN %s", paramv[1]);
+        snprintf(response, BUFFER_SIZE, "JOIN %s", msg.paramv[1]);
         send = true;
-    } else if (strcmp(command, "KICK") == 0) { // 0: channel, 1: nick, 2: reason
-        if (*paramv[0] != '#') return;
+    } else if (strcmp(msg.command, "KICK") == 0) { // 0: channel, 1: nick, 2: reason
+        if (*msg.paramv[0] != '#') return;
 
         // TODO: compare to current nick instead of nick in config
-        if (strcasecmp(paramv[1], (*config)->nickname) == 0) { // bot kicked
-            snprintf(response, BUFFER_SIZE, "JOIN %s", paramv[0]); // re-join
+        if (strcasecmp(msg.paramv[1], (*config)->nickname) == 0) { // bot kicked
+            snprintf(response, BUFFER_SIZE, "JOIN %s", msg.paramv[0]); // re-join
             send = true;
         }
-    } else if (strcmp(command, "433") == 0) { // nick in use
+    } else if (strcmp(msg.command, "433") == 0) { // nick in use
         snprintf(response, BUFFER_SIZE, "NICK %s_", (*config)->nickname);
         send = true;
-    } else if (strcmp(command, "376") == 0 || strcmp(command, "422") == 0) { // end of motd
+    } else if (strcmp(msg.command, "376") == 0 || strcmp(msg.command, "422") == 0) { // end of motd
         snprintf(response, BUFFER_SIZE, "JOIN %s", (*config)->channel_name);
         send = true;
     }
