@@ -1,6 +1,3 @@
-#define _DEFAULT_SOURCE
-#define _GNU_SOURCE
-
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,28 +10,20 @@
 #include "config.h"
 #include "connection.h"
 #include "ssl_connection.h"
+#include "bot.h"
 
-#define RECONNECT_INTERVAL 60
-
-typedef struct {
-    struct timespec start_time;
-    SSL_CTX *ssl_ctx;
-    SSL *ssl;
-    int sockfd;
-    bool use_ssl;
-} bot_data;
-
-typedef struct { // TODO: check lengths
-    char prefix[256];
-    char command[32];
-    char params[500];
-    char nick[16]; // parsed from prefix
-    char user[16]; // parsed from prefix
-    char host[64]; // parsed from prefix
-    int paramc;
-    char *paramv[15];
-} irc_message;
-
+// <message>  ::= [':' <prefix> <SPACE> ] <command> <params> <crlf>
+// <prefix>   ::= <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
+// <command>  ::= <letter> { <letter> } | <number> <number> <number>
+// <SPACE>    ::= ' ' { ' ' }
+// <params>   ::= <SPACE> [ ':' <trailing> | <middle> <params> ]
+//
+// <middle>   ::= <Any *non-empty* sequence of octets not including SPACE
+//                or NUL or CR or LF, the first of which may not be ':'>
+// <trailing> ::= <Any, possibly *empty*, sequence of octets not including
+//                  NUL or CR or LF>
+//
+// <crlf>     ::= CR LF
 irc_message* parse_message(const char msg[]) {
     irc_message *ircmsg = malloc(sizeof(*ircmsg));
     if (ircmsg == NULL) {
@@ -133,18 +122,6 @@ void cleanup(bot_data *data) {
         SSL_CTX_free(data->ssl_ctx);
 }
 
-// <message>  ::= [':' <prefix> <SPACE> ] <command> <params> <crlf>
-// <prefix>   ::= <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
-// <command>  ::= <letter> { <letter> } | <number> <number> <number>
-// <SPACE>    ::= ' ' { ' ' }
-// <params>   ::= <SPACE> [ ':' <trailing> | <middle> <params> ]
-//
-// <middle>   ::= <Any *non-empty* sequence of octets not including SPACE
-//                or NUL or CR or LF, the first of which may not be ':'>
-// <trailing> ::= <Any, possibly *empty*, sequence of octets not including
-//                  NUL or CR or LF>
-//
-// <crlf>     ::= CR LF
 void handle_line(const char line[], bot_config **config, bot_data *data) {
     if (*line == '\0') return;
 
@@ -250,44 +227,5 @@ void handle_connection(bot_config **config, bot_data *data) {
     }
 
     close(data->sockfd);
-}
-
-int main() {
-    bot_config *botcfg = NULL;
-
-    bot_data botdata;
-    botdata.ssl = NULL;
-    botdata.ssl_ctx = NULL;
-
-    if (!load_config(CONFIG_FILE, &botcfg)) {
-        return 1;
-    }
-
-    while (true) { // connection initiation
-        botdata.use_ssl = botcfg->use_ssl; // cannot be reloaded from config
-        botdata.sockfd = -1;
-
-        if ((botdata.sockfd = create_connection(botcfg->server_address, botcfg->server_port)) == -1) {
-            printf("Failed to connect, waiting for %d seconds and trying again\n", RECONNECT_INTERVAL);
-            sleep(RECONNECT_INTERVAL);
-            continue;
-        } else {
-            printf("Connection ok\n");
-        }
-
-        if (botdata.use_ssl && !init_ssl(&botdata, botcfg->server_address))
-            break;
-
-        handle_connection(&botcfg, &botdata);
-
-        printf("Connection was lost, trying to reconnect...\n");
-    }
-
-    printf("Cleaning up resources and exiting\n");
-
-    cleanup(&botdata);
-    free(botcfg);
-
-    return 0;
 }
 
