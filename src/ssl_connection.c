@@ -16,8 +16,8 @@ SSL_CTX* create_ssl_context() {
     SSL_CTX *ctx = NULL;
 
     OpenSSL_add_all_algorithms();
-    ERR_load_BIO_strings();
-    ERR_load_crypto_strings();
+    //ERR_load_BIO_strings();
+    //ERR_load_crypto_strings();
     SSL_load_error_strings();
 
     if (SSL_library_init() < 0) {
@@ -25,7 +25,7 @@ SSL_CTX* create_ssl_context() {
         return NULL;
     }
 
-    const SSL_METHOD *method = SSLv23_client_method();
+    const SSL_METHOD *method = TLS_client_method();
 
     if ((ctx = SSL_CTX_new(method)) == NULL) {
         fprintf(stderr, "SSL_CTX_new() failed\n");
@@ -33,7 +33,8 @@ SSL_CTX* create_ssl_context() {
     }
 
     SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
+    SSL_CTX_set_options(ctx, SSL_OP_ALL);
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
 
     if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
@@ -46,6 +47,7 @@ SSL_CTX* create_ssl_context() {
     return ctx;
 }
 
+// TODO: not really needed, as hosts are verified while using version 1.1.0
 bool check_cert(SSL *ssl, const char host[]) {
     static int MAX_CN_LENGTH = 256;
 
