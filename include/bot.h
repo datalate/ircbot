@@ -18,12 +18,12 @@ typedef struct {
 typedef struct { // TODO: check lengths
     char prefix[256];
     char command[32];
-    char params[500];
-    char nick[16]; // parsed from prefix
-    char user[16]; // parsed from prefix
+    char params[507];
+    char nick[32]; // parsed from prefix
+    char user[64]; // parsed from prefix
     char host[64]; // parsed from prefix
-    int paramc;
-    char *paramv[15];
+    size_t paramc;
+    char *paramv[16];
 } irc_message;
 
 bool init_ssl(bot_data *data, const char server_address[]);

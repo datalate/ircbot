@@ -82,6 +82,9 @@ void send_message(bot_data *data, const char msg[]) {
 }
 
 bool init_ssl(bot_data *data, const char server_address[]) {
+    if (data == NULL)
+        return false;
+
     if (data->ssl_ctx == NULL && (data->ssl_ctx = create_ssl_context()) == NULL) {
         fprintf(stderr, "Failed to create SSL context\n");
         return false;

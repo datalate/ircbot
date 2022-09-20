@@ -5,17 +5,17 @@
 #include <libconfig.h>
 
 typedef struct {
-    char match[64];
-    char reply[128];
+    char match[256];
+    char reply[256];
 } bot_config_reply;
 
 typedef struct {
-    char server_address[64];
-    char server_port[10];
+    char server_address[256];
+    char server_port[6];
     bool use_ssl;
-    char username[16];
-    char nickname[16]; // NICKLEN = 9
-    char channel_name[64]; // CHANNELLEN=50
+    char username[64];
+    char nickname[32];
+    char channel_name[64];
     char admin_hostname[64];
     size_t num_replies;
     bot_config_reply replies[];
