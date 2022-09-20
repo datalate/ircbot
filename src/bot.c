@@ -81,6 +81,15 @@ void send_message(bot_data *data, const char msg[]) {
         send_msg(data->sockfd, msg);
 }
 
+void send_auth(bot_config *config, bot_data *data) {
+    char auth_msg[BUFFER_SIZE];
+
+    snprintf(auth_msg, BUFFER_SIZE, "USER %s 0 * :%s\r\nNICK %s",
+             config->username, config->username, config->nickname);
+
+    send_message(data, auth_msg);
+}
+
 bool init_ssl(bot_data *data, const char server_address[]) {
     if (data == NULL)
         return false;
@@ -125,6 +134,44 @@ void cleanup(bot_data *data) {
         SSL_CTX_free(data->ssl_ctx);
 }
 
+void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
+    // 0: target, 1: message
+    if (*msg->paramv[0] != '#') return; // only respond to channel messages
+
+    bool is_admin = strcmp(msg->host, (*config)->admin_hostname) == 0;
+    char response[BUFFER_SIZE];
+
+    if (is_admin && strcasecmp(msg->paramv[1], "!reload") == 0) {
+        load_config(CONFIG_FILE, config);
+        snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Config file reloaded", msg->paramv[0]);
+        send_message(data, response);
+    } else if (is_admin && strcasecmp(msg->paramv[1], "!reconnect") == 0) {
+        snprintf(response, BUFFER_SIZE, "PRIVMSG %s :See you soon! :)\r\nQUIT", msg->paramv[0]);
+        send_message(data, response);
+    } else if (strcasecmp(msg->paramv[1], "!uptime") == 0) {
+        struct timespec current_time;
+
+        clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+        int seconds_passed = current_time.tv_sec - data->start_time.tv_sec;
+        int minutes = seconds_passed / 60;
+        int seconds = seconds_passed % 60;
+        int hours = minutes / 60;
+        minutes = minutes % 60;
+
+        snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Current uptime: %02d:%02d:%02d",
+                 msg->paramv[0], hours, minutes, seconds);
+        send_message(data, response);
+    } else {
+        for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
+            if (strcasecmp(msg->paramv[1], (*config)->replies[i].match) == 0) {
+                snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], (*config)->replies[i].reply);
+                send_message(data, response);
+                break;
+            }
+        }
+    }
+}
+
 void handle_line(const char line[], bot_config **config, bot_data *data) {
     if (*line == '\0') return;
 
@@ -137,38 +184,7 @@ void handle_line(const char line[], bot_config **config, bot_data *data) {
         snprintf(response, BUFFER_SIZE, "PONG %s", msg->params);
         send = true;
     } else if (strcmp(msg->command, "PRIVMSG") == 0) { // 0: target, 1: message
-        if (*msg->paramv[0] != '#') return; // only respond to channel messages
-
-        bool is_admin = strcmp(msg->host, (*config)->admin_hostname) == 0;
-
-        if (is_admin && strcasecmp(msg->paramv[1], "!reload") == 0) {
-            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Config file reloaded", msg->paramv[0]);
-            load_config(CONFIG_FILE, config);
-            send = true;
-        } else if (is_admin && strcasecmp(msg->paramv[1], "!reconnect") == 0) {
-            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :See you soon! :)\r\nQUIT", msg->paramv[0]);
-            send = true;
-        } else if (strcasecmp(msg->paramv[1], "!uptime") == 0) {
-            struct timespec current_time;
-
-            clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
-            int seconds_passed = current_time.tv_sec - data->start_time.tv_sec;
-            int minutes = seconds_passed / 60;
-            int seconds = seconds_passed % 60;
-            int hours = minutes / 60;
-            minutes = minutes % 60;
-
-            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :Current uptime: %02d:%02d:%02d", msg->paramv[0], hours, minutes, seconds);
-            send = true;
-        } else {
-            for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
-                if (strcasecmp(msg->paramv[1], (*config)->replies[i].match) == 0) {
-                    snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], (*config)->replies[i].reply);
-                    send = true;
-                    break;
-                }
-            }
-        }
+        handle_privmsg(msg, config, data);
     } else if (strcmp(msg->command, "MODE") == 0) { // 0: target, 1: mode
     } else if (strcmp(msg->command, "INVITE") == 0) { // 0: target, 1: channel
         if (*msg->paramv[1] != '#') return;
@@ -195,15 +211,6 @@ void handle_line(const char line[], bot_config **config, bot_data *data) {
 
     if (send)
         send_message(data, response);
-}
-
-void send_auth(bot_config *config, bot_data *data) {
-    char auth_msg[BUFFER_SIZE];
-
-    snprintf(auth_msg, BUFFER_SIZE, "USER %s 0 * :%s\r\nNICK %s",
-             config->username, config->username, config->nickname);
-
-    send_message(data, auth_msg);
 }
 
 void handle_connection(bot_config **config, bot_data *data) {
