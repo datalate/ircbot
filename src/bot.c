@@ -5,11 +5,13 @@
 #include <unistd.h>
 #include <time.h>
 #include <openssl/ssl.h>
+#include <pthread.h>
 
 #include "common.h"
 #include "config.h"
 #include "connection.h"
 #include "ssl_connection.h"
+#include "timed_message.h"
 #include "bot.h"
 
 // <message>  ::= [':' <prefix> <SPACE> ] <command> <params> <crlf>
@@ -218,6 +220,18 @@ void handle_connection(bot_config **config, bot_data *data) {
 
     send_auth(*config, data);
 
+    pthread_t thread;
+    timed_message_data *job_data = malloc(sizeof(*job_data));
+    job_data->bot_data = data;
+    strcpy(job_data->channel, (*config)->channel_name);
+    strcpy(job_data->message, "https://www.nytimes.com/games/wordle/index.html");
+    job_data->at_hour = 10;
+    job_data->at_minute = 30;
+    pthread_mutex_init(&job_data->exit_cond_m, NULL);
+    pthread_cond_init(&job_data->exit_cond, NULL);
+
+    pthread_create(&thread, NULL, handle_job, job_data); // thread takes care of freeing job_data
+
     while (true) { // connected to the server
         char *lines = NULL;
         if (data->use_ssl)
@@ -235,6 +249,9 @@ void handle_connection(bot_config **config, bot_data *data) {
 
         free(lines);
     }
+
+    pthread_cond_signal(&job_data->exit_cond);
+    pthread_join(thread, NULL);
 
     close(data->sockfd);
 }

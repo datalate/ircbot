@@ -30,6 +30,8 @@ bool init_ssl(bot_data *data, const char server_address[]);
 
 void cleanup(bot_data *data);
 
+void send_message(bot_data *data, const char msg[]);
+
 void send_auth(bot_config *config, bot_data *data);
 
 void handle_connection(bot_config **config, bot_data *data);
