@@ -221,23 +221,13 @@ void handle_connection(bot_config **config, bot_data *data) {
 
     send_auth(*config, data);
 
-    bot_config_timed_message_data *timed_msgs = (*config)->timed_message_data;
-    pthread_t job_threads[timed_msgs->num_timed_messages];
-    timed_message_data *job_data[timed_msgs->num_timed_messages];
-
-    for (unsigned int i = 0; i < timed_msgs->num_timed_messages; ++i) {
-        job_data[i] = malloc(sizeof(*job_data[i]));
-
-        job_data[i]->bot_data = data;
-        strcpy(job_data[i]->channel, timed_msgs->timed_messages[i].channel);
-        strcpy(job_data[i]->message, timed_msgs->timed_messages[i].message);
-        job_data[i]->at_hour = timed_msgs->timed_messages[i].at_hour;
-        job_data[i]->at_minute = timed_msgs->timed_messages[i].at_minute;
-
-        pthread_mutex_init(&job_data[i]->exit_cond_m, NULL);
-        pthread_cond_init(&job_data[i]->exit_cond, NULL);
-        pthread_create(&job_threads[i], NULL, handle_job, job_data[i]); // thread takes care of freeing job_data
-    }
+    pthread_t job_thread;
+    timed_message_data *job_data = malloc(sizeof(*job_data));
+    job_data->bot_data = data;
+    job_data->bot_config = config;
+    pthread_mutex_init(&job_data->exit_cond_m, NULL);
+    pthread_cond_init(&job_data->exit_cond, NULL);
+    pthread_create(&job_thread, NULL, handle_job, job_data); // thread takes care of freeing job_data
 
     while (true) { // connected to the server
         char *lines = NULL;
@@ -257,10 +247,8 @@ void handle_connection(bot_config **config, bot_data *data) {
         free(lines);
     }
 
-    for (unsigned int i = 0; i < timed_msgs->num_timed_messages; ++i) {
-        pthread_cond_signal(&job_data[i]->exit_cond);
-        pthread_join(job_threads[i], NULL);
-    }
+    pthread_cond_signal(&job_data->exit_cond);
+    pthread_join(job_thread, NULL);
 
     close(data->sockfd);
 }

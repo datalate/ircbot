@@ -15,44 +15,46 @@ static void job_cleanup_handler(void *arg) {
     free(data);
 }
 
+void run_triggered_jobs(timed_message_data *data, int hour, int minute) {
+    bot_config_timed_message_data *msg_data = (*data->bot_config)->timed_message_data;
+    for (unsigned int i = 0; i < msg_data->num_timed_messages; ++i) {
+        bot_config_timed_message *msg = &msg_data->timed_messages[i];
+        if (hour == msg->at_hour && minute == msg->at_minute) {
+            printf("Running a triggered job\n");
+            char channel_message[BUFFER_SIZE];
+            snprintf(channel_message, BUFFER_SIZE, "PRIVMSG %s :%s", msg->channel, msg->message);
+            send_message(data->bot_data, channel_message);
+        }
+    }
+}
+
 void* handle_job(void *arg) {
-    time_t current_t, job_t;
-    struct tm *script_t;
-    char channel_message[BUFFER_SIZE];
+    time_t current_t;
     timed_message_data *data = arg;
 
     pthread_mutex_lock(&data->exit_cond_m);
     pthread_cleanup_push(job_cleanup_handler, arg);
-    snprintf(channel_message, BUFFER_SIZE, "PRIVMSG %s :%s", data->channel, data->message);
 
-    time(&current_t);
-    script_t = localtime(&current_t);
-
-    // in case the job already ran today, run it tomorrow instead
-    if ((script_t->tm_hour > data->at_hour) || (script_t->tm_hour == data->at_hour && script_t->tm_min >= data->at_minute))
-        script_t->tm_mday++;
-
-    script_t->tm_hour = data->at_hour;
-    script_t->tm_min = data->at_minute;
-    script_t->tm_sec = 0;
-
+    int interval = 60;
     while (true) {
-        job_t = mktime(script_t);
-        int sleep_seconds = difftime(job_t, current_t);
+        struct tm *job_tm;
+        int sleep_seconds, sleep_offset;
+
+        time(&current_t);
+        job_tm = localtime(&current_t);
+
+        run_triggered_jobs(data, job_tm->tm_hour, job_tm->tm_min);
+
+        sleep_offset = -job_tm->tm_sec;
+        sleep_seconds = interval + sleep_offset;
+        if (sleep_seconds < 0) sleep_seconds = 0;
 
         struct timespec wait_until;
         clock_gettime(CLOCK_REALTIME, &wait_until);
         wait_until.tv_sec += sleep_seconds;
 
-        printf("Sleeping for %d seconds\n", sleep_seconds);
         int result = pthread_cond_timedwait(&data->exit_cond, &data->exit_cond_m, &wait_until);
         if (result != ETIMEDOUT) break; // got signal to close thread 
-
-        printf("Running job\n");
-        send_message(data->bot_data, channel_message);
-
-        script_t->tm_mday++; // run the job tomorrow at the same time
-        time(&current_t); // update current time
     }
 
     pthread_cleanup_pop(1);
