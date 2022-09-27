@@ -164,9 +164,10 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
                  msg->paramv[0], hours, minutes, seconds);
         send_message(data, response);
     } else {
-        for (unsigned int i = 0; i < (*config)->num_replies; ++i) {
-            if (strcasecmp(msg->paramv[1], (*config)->replies[i].match) == 0) {
-                snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], (*config)->replies[i].reply);
+        bot_config_reply_data *reply_data = (*config)->reply_data;
+        for (unsigned int i = 0; i < reply_data->num_replies; ++i) {
+            if (strcasecmp(msg->paramv[1], reply_data->replies[i].match) == 0) {
+                snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], reply_data->replies[i].reply);
                 send_message(data, response);
                 break;
             }
@@ -220,17 +221,23 @@ void handle_connection(bot_config **config, bot_data *data) {
 
     send_auth(*config, data);
 
-    pthread_t thread;
-    timed_message_data *job_data = malloc(sizeof(*job_data));
-    job_data->bot_data = data;
-    strcpy(job_data->channel, (*config)->channel_name);
-    strcpy(job_data->message, "https://www.nytimes.com/games/wordle/index.html");
-    job_data->at_hour = 10;
-    job_data->at_minute = 30;
-    pthread_mutex_init(&job_data->exit_cond_m, NULL);
-    pthread_cond_init(&job_data->exit_cond, NULL);
+    bot_config_timed_message_data *timed_msgs = (*config)->timed_message_data;
+    pthread_t job_threads[timed_msgs->num_timed_messages];
+    timed_message_data *job_data[timed_msgs->num_timed_messages];
 
-    pthread_create(&thread, NULL, handle_job, job_data); // thread takes care of freeing job_data
+    for (unsigned int i = 0; i < timed_msgs->num_timed_messages; ++i) {
+        job_data[i] = malloc(sizeof(*job_data[i]));
+
+        job_data[i]->bot_data = data;
+        strcpy(job_data[i]->channel, timed_msgs->timed_messages[i].channel);
+        strcpy(job_data[i]->message, timed_msgs->timed_messages[i].message);
+        job_data[i]->at_hour = timed_msgs->timed_messages[i].at_hour;
+        job_data[i]->at_minute = timed_msgs->timed_messages[i].at_minute;
+
+        pthread_mutex_init(&job_data[i]->exit_cond_m, NULL);
+        pthread_cond_init(&job_data[i]->exit_cond, NULL);
+        pthread_create(&job_threads[i], NULL, handle_job, job_data[i]); // thread takes care of freeing job_data
+    }
 
     while (true) { // connected to the server
         char *lines = NULL;
@@ -250,8 +257,10 @@ void handle_connection(bot_config **config, bot_data *data) {
         free(lines);
     }
 
-    pthread_cond_signal(&job_data->exit_cond);
-    pthread_join(thread, NULL);
+    for (unsigned int i = 0; i < timed_msgs->num_timed_messages; ++i) {
+        pthread_cond_signal(&job_data[i]->exit_cond);
+        pthread_join(job_threads[i], NULL);
+    }
 
     close(data->sockfd);
 }

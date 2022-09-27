@@ -8,6 +8,10 @@ general = {
     admin_hostname = "localhost";
 };
 
+timed_messages = (
+    { at_hour = 8; at_minute = 0; channel = "#bot_testing"; message = "Rise and shine!"; },
+);
+
 replies = (
-  { match = "!google"; reply = "https://google.com"; }
+    { match = "!google"; reply = "https://google.com"; },
 );

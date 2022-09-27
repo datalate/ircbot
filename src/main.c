@@ -42,7 +42,7 @@ int main() {
     printf("Cleaning up resources and exiting\n");
 
     cleanup(&botdata);
-    free(botcfg);
+    cleanup_config(botcfg);
 
     return 0;
 }
