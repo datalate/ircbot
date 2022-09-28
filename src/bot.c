@@ -12,6 +12,7 @@
 #include "connection.h"
 #include "ssl_connection.h"
 #include "timed_message.h"
+#include "int_array.h"
 #include "bot.h"
 
 // <message>  ::= [':' <prefix> <SPACE> ] <command> <params> <crlf>
@@ -29,6 +30,7 @@
 irc_message* parse_message(const char msg[]) {
     irc_message *ircmsg = malloc(sizeof(*ircmsg));
     if (ircmsg == NULL) {
+        fprintf(stderr, "malloc() failed\n");
         return NULL;
     }
 
@@ -164,14 +166,20 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
                  msg->paramv[0], hours, minutes, seconds);
         send_message(data, response);
     } else {
+        int_array matching_indexes;
+        init_array(&matching_indexes);
+        if (matching_indexes.array == NULL) return;
         bot_config_reply_data *reply_data = (*config)->reply_data;
-        for (unsigned int i = 0; i < reply_data->num_replies; ++i) {
-            if (strcasecmp(msg->paramv[1], reply_data->replies[i].match) == 0) {
-                snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], reply_data->replies[i].reply);
-                send_message(data, response);
-                break;
-            }
-        }
+        srand(time(NULL));
+
+        for (unsigned int i = 0; i < reply_data->num_replies; ++i)
+            if (strcasecmp(msg->paramv[1], reply_data->replies[i].match) == 0)
+                insert_array(&matching_indexes, i);
+
+        unsigned int reply_index = matching_indexes.array[rand() % matching_indexes.length];
+        snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], reply_data->replies[reply_index].reply);
+        send_message(data, response);
+        free_array(&matching_indexes);
     }
 }
 
