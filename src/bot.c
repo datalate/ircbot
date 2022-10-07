@@ -176,9 +176,12 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
             if (strcasecmp(msg->paramv[1], reply_data->replies[i].match) == 0)
                 insert_array(&matching_indexes, i);
 
-        unsigned int reply_index = matching_indexes.array[rand() % matching_indexes.length];
-        snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], reply_data->replies[reply_index].reply);
-        send_message(data, response);
+        if (matching_indexes.length > 0) {
+            unsigned int reply_i = matching_indexes.array[rand() % matching_indexes.length];
+            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], reply_data->replies[reply_i].reply);
+            send_message(data, response);
+        }
+
         free_array(&matching_indexes);
     }
 }
