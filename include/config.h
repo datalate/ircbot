@@ -3,10 +3,13 @@
 
 #include <stdbool.h>
 #include <libconfig.h>
+#include <regex.h>
 
 typedef struct {
     char match[256];
     char reply[256];
+    regex_t regex;
+    bool use_regex;
 } bot_config_reply;
 
 typedef struct {
@@ -39,6 +42,7 @@ typedef struct {
 } bot_config;
 
 bool load_config(const char filename[], bot_config **config);
+
 void cleanup_config(bot_config *config);
 
 #endif

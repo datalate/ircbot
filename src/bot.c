@@ -172,9 +172,13 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
         bot_config_reply_data *reply_data = (*config)->reply_data;
         srand(time(NULL));
 
-        for (unsigned int i = 0; i < reply_data->num_replies; ++i)
-            if (strcasecmp(msg->paramv[1], reply_data->replies[i].match) == 0)
-                insert_array(&matching_indexes, i);
+        for (unsigned int i = 0; i < reply_data->num_replies; ++i) {
+            bot_config_reply *reply = &reply_data->replies[i];
+            if (
+                (!reply->use_regex && strcasecmp(msg->paramv[1], reply->match) == 0) ||
+                (reply->use_regex && regexec(&reply->regex, msg->paramv[1], 0, NULL, 0) == 0)
+               ) insert_array(&matching_indexes, i);
+        }
 
         if (matching_indexes.length > 0) {
             unsigned int reply_i = matching_indexes.array[rand() % matching_indexes.length];
