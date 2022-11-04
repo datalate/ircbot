@@ -2,6 +2,10 @@ SRC_DIR = src
 OBJ_DIR = obj
 BIN_DIR = bin
 
+ifeq ($(PREFIX),)
+	PREFIX := $(HOME)/.local
+endif
+
 SRC = $(wildcard $(SRC_DIR)/*.c)
 OBJ = $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 OUT = $(BIN_DIR)/bot
@@ -21,7 +25,11 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 $(BIN_DIR) $(OBJ_DIR):
 	mkdir -p $@
 
-.PHONY: clean
+.PHONY: clean install
 
 clean:
 	$(RM) -rv $(OBJ_DIR) $(OUT)
+
+install: $(OUT)
+	install -d $(PREFIX)/bin/
+	install -m 0755 $(OUT) $(PREFIX)/bin/
