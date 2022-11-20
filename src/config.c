@@ -1,9 +1,11 @@
+#define PCRE2_CODE_UNIT_WIDTH 8
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 #include <libconfig.h>
-#include <regex.h>
+#include <pcre2.h>
 
 #include "config.h"
 
@@ -57,11 +59,17 @@ bot_config_reply_data* load_config_replies(config_t cfg_file) {
             int use_regex = 0;
             config_setting_lookup_bool(reply_cfg_row, "regex", &use_regex);
             if (use_regex) {
-                static int flags = REG_EXTENDED | REG_NOSUB;
-                if (regcomp(&reply_data->replies[replies_count].regex, match_str, flags) != 0) {
+                int errnum;
+                PCRE2_SIZE erroffset;
+
+                PCRE2_SPTR pattern = (PCRE2_SPTR)match_str;
+                pcre2_code *re = pcre2_compile(pattern, PCRE2_ZERO_TERMINATED, 0, &errnum, &erroffset, NULL);
+                if (re == NULL) {
                     fprintf(stderr, "Invalid regex: '%s' at row %d of reply config\n", match_str, i + 1);
                     continue;
                 }
+
+                reply_data->replies[replies_count].regex = re;
             }
 
             reply_data->replies[replies_count].use_regex = use_regex;
@@ -173,7 +181,7 @@ bool load_config(const char filename[], bot_config **config) {
 void cleanup_config(bot_config *config) {
     for (unsigned int i = 0; i < config->reply_data->num_replies; ++i) {
         bot_config_reply *reply = &config->reply_data->replies[i];
-        if (reply->use_regex) regfree(&reply->regex);
+        if (reply->use_regex) pcre2_code_free(reply->regex);
     }
 
     free(config->reply_data);

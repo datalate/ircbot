@@ -1,14 +1,16 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#define PCRE2_CODE_UNIT_WIDTH 8
+
 #include <stdbool.h>
 #include <libconfig.h>
-#include <regex.h>
+#include <pcre2.h>
 
 typedef struct {
     char match[256];
     char reply[256];
-    regex_t regex;
+    pcre2_code *regex;
     bool use_regex;
 } bot_config_reply;
 

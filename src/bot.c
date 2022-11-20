@@ -1,3 +1,5 @@
+#define PCRE2_CODE_UNIT_WIDTH 8
+
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,6 +8,7 @@
 #include <time.h>
 #include <openssl/ssl.h>
 #include <pthread.h>
+#include <pcre2.h>
 
 #include "common.h"
 #include "config.h"
@@ -174,10 +177,22 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
 
         for (unsigned int i = 0; i < reply_data->num_replies; ++i) {
             bot_config_reply *reply = &reply_data->replies[i];
-            if (
-                (!reply->use_regex && strcasecmp(msg->paramv[1], reply->match) == 0) ||
-                (reply->use_regex && regexec(&reply->regex, msg->paramv[1], 0, NULL, 0) == 0)
-               ) insert_array(&matching_indexes, i);
+            bool match = false;
+
+            if (!reply->use_regex && strcasecmp(msg->paramv[1], reply->match) == 0) {
+                match = true;
+            } else if (reply->use_regex) {
+                pcre2_match_data *match_data = pcre2_match_data_create_from_pattern(reply->regex, NULL);
+                PCRE2_SPTR subject = (PCRE2_SPTR)msg->paramv[1];
+                PCRE2_SIZE subject_length = (PCRE2_SIZE)strlen((char *)subject);
+
+                int rc = pcre2_match(reply->regex, subject, subject_length, 0, 0, match_data, NULL);
+                match = rc >= 0;
+
+                pcre2_match_data_free(match_data);
+            }
+
+            if (match) insert_array(&matching_indexes, i);
         }
 
         if (matching_indexes.length > 0) {
