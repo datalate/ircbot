@@ -91,13 +91,14 @@ void ssl_send_msg(SSL *ssl, const char msg[]) {
     
     int total_write_bytes = 0, write_bytes = 0;
     while (total_write_bytes != len) {
+        ERR_clear_error();
         write_bytes = SSL_write(ssl, send_buffer + total_write_bytes, len - total_write_bytes);
         if (write_bytes <= 0) {
             int error_code = SSL_get_error(ssl, write_bytes);
-            fprintf(stderr, "SSL_write() failed: %d\n", SSL_get_error(ssl, write_bytes));
+            fprintf(stderr, "SSL_write() failed: %d\n", error_code);
 
             write_bytes = 0;
-            if (error_code == SSL_ERROR_WANT_WRITE) continue; else break;
+            break;
         }
 
         printf("SSL_write(): %d bytes sent\n", write_bytes);
@@ -105,7 +106,7 @@ void ssl_send_msg(SSL *ssl, const char msg[]) {
         total_write_bytes += write_bytes;
     }
 
-    printf("SEND: %s", send_buffer);
+    printf("SEND: %s", send_buffer); // TODO: may not always be sent
     free(send_buffer);
 }
 
@@ -132,12 +133,13 @@ char* ssl_get_lines(SSL *ssl) {
         recv_buffer = tmp_ptr;
         memset(recv_buffer + total_recv_bytes, 0, BUFFER_SIZE + 1);
 
+        ERR_clear_error();
         if ((recv_bytes = SSL_read(ssl, recv_buffer + total_recv_bytes, BUFFER_SIZE)) <= 0) {
             int error_code = SSL_get_error(ssl, recv_bytes);
             fprintf(stderr, "SSL_read() failed: %d\n", error_code);
-            recv_bytes = 0;
 
-            if (error_code == SSL_ERROR_WANT_READ) continue; else break;
+            recv_bytes = 0;
+            break;
         }
 
         printf("SSL_read(): %d bytes received into %p\n", recv_bytes, &recv_buffer);
