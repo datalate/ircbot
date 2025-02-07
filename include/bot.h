@@ -13,6 +13,8 @@ typedef struct {
     SSL *ssl;
     int sockfd;
     bool use_ssl;
+    int roulette_chamber;
+    int roulette_current;
 } bot_data;
 
 typedef struct { // TODO: check lengths

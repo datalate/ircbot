@@ -1,5 +1,10 @@
 #define PCRE2_CODE_UNIT_WIDTH 8
 
+#define RANDRANGE(n) (int)((double)rand() / ((double)RAND_MAX + 1) * n)
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#define CARDS_COUNT 53
+
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +22,11 @@
 #include "timed_message.h"
 #include "int_array.h"
 #include "bot.h"
+
+typedef struct {
+  int suit;
+  int rank;
+} card_t;
 
 // <message>  ::= [':' <prefix> <SPACE> ] <command> <params> <crlf>
 // <prefix>   ::= <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
@@ -155,6 +165,122 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
     } else if (is_admin && strcasecmp(msg->paramv[1], "!reconnect") == 0) {
         snprintf(response, BUFFER_SIZE, "PRIVMSG %s :See you soon! :)\r\nQUIT", msg->paramv[0]);
         send_message(data, response);
+    } else if (strcasecmp(msg->paramv[1], "!roulette") == 0) {
+        srand(time(NULL));
+
+        if (data->roulette_chamber == -1) data->roulette_chamber = RANDRANGE(6);
+
+        if (data->roulette_current == data->roulette_chamber) {
+            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :BANG! %s is dead\r\nPRIVMSG %s :\x01""ACTION loads a round and spins the barrel\x01", msg->paramv[0], msg->nick, msg->paramv[0]);
+            data->roulette_chamber = RANDRANGE(6);
+            data->roulette_current = 0;
+        } else {
+            snprintf(response, BUFFER_SIZE, "PRIVMSG %s :*click*", msg->paramv[0]);
+            data->roulette_current++;
+        }
+        send_message(data, response);
+    } else if (strcasecmp(msg->paramv[1], "!roll") == 0) {
+        srand(time(NULL));
+
+        snprintf(response, BUFFER_SIZE, "PRIVMSG %s :1d6: %d", msg->paramv[0], RANDRANGE(6) + 1);
+        send_message(data, response);
+    } else if (strncasecmp(msg->paramv[1], "!poker", 6) == 0) {
+        srand(time(NULL));
+
+        static const char* suitnames[] = {"🃏", "♠", "♣", "♥", "♦"};
+        static const char* ranknames[] = {"?", "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"};
+        static const char* winnames[] = {"HIGH CARD", "ONE PAIR", "TWO PAIRS", "THREE-OF-A-KIND", "STRAIGHT", "FLUSH", "FULL HOUSE", "FOUR-OF-A-KIND", "STRAIGHT FLUSH", "ROYAL FLUSH", "FIVE-OF-A-KIND"};
+
+        static card_t cards[CARDS_COUNT];
+        static int discarded = 0;
+
+        size_t cmdlen = strlen(msg->paramv[1]);
+
+        int keep = 0; // 00000
+        for (size_t i = 7; i < cmdlen; ++i) { // parse additional input after !poker<space>
+            int slot = msg->paramv[1][i] - '0';
+            if (slot >= 1 && slot <= 5) keep |= 1 << (slot - 1);
+        }
+
+        // TODO: cards not initialized on fresh run when cmdlen >= 8
+        if (discarded > 0 || cmdlen < 8) {
+            // init card array
+            for (size_t i = 0; i < CARDS_COUNT - 1; ++i) {
+                cards[i].rank = (i % 13) + 1;
+                cards[i].suit = (i / 13) + 1;
+            }
+
+            // joker
+            cards[CARDS_COUNT - 1].rank = 0;
+            cards[CARDS_COUNT - 1].suit = 0;
+
+            // shuffle
+            for (size_t i = 0; i < CARDS_COUNT; ++i) {
+                size_t j = i + RANDRANGE(CARDS_COUNT - i);
+                card_t t = cards[j];
+                cards[j] = cards[i];
+                cards[i] = t;
+            }
+
+            discarded = 0;
+        } else {
+            // replace discarded cards
+            for (size_t i = 0; i < 5; ++i) {
+                int discard = !((keep >> i) & 1);
+                if (discard) cards[i] = cards[5 + discarded++];
+            }
+        }
+
+        int win = 0;
+        int joker = 0;
+        int pairs = 0;
+        int suitpairs = 0;
+        int minrank1 = 13;
+        int maxrank1 = 1;
+        int minrank2 = 14;
+        int maxrank2 = 2;
+
+        for (int i = 0; i < 5; ++i) {
+            if (cards[i].rank == 0) {
+                joker = 1;
+            } else {
+                int rank = cards[i].rank;
+                minrank1 = MIN(rank, minrank1);
+                maxrank1 = MAX(rank, maxrank1);
+
+                if (rank == 1) rank = 14;
+                minrank2 = MIN(rank, minrank2);
+                maxrank2 = MAX(rank, maxrank2);
+            }
+
+            for (int j = i + 1; j < 5; ++j) { // compare every card to another
+                if (cards[i].rank == cards[j].rank) pairs++;
+                if (cards[i].suit == cards[j].suit) suitpairs++;
+            }
+        }
+
+        int minmaxdiff1 = maxrank1 - minrank1;
+        int minmaxdiff2 = maxrank2 - minrank2;
+        int flush = ((joker && suitpairs == 6) || suitpairs == 10);
+        int straight = (pairs == 0 && (minmaxdiff1 < 5 || minmaxdiff2 < 5));
+
+        if (joker && pairs == 6) win = 10;
+        else if (flush && straight && minrank2 > 9) win = 9;
+        else if (flush && straight) win = 8;
+        else if ((joker && pairs == 3) || pairs == 6) win = 7;
+        else if ((joker && pairs == 2) || pairs == 4) win = 6;
+        else if (flush) win = 5;
+        else if (straight) win = 4;
+        else if ((joker && pairs == 1) || pairs == 3) win = 3;
+        else if (pairs == 2) win = 2;
+        else if (joker || pairs == 1) win = 1;
+
+        snprintf(response, BUFFER_SIZE, "PRIVMSG %s :", msg->paramv[0]);
+        snprintf(response + strlen(response), BUFFER_SIZE - strlen(response), "%s: ", winnames[win]);
+        for (size_t i = 0; i < 5; ++i) {
+            snprintf(response + strlen(response), BUFFER_SIZE - strlen(response), "%s%-2s ", suitnames[cards[i].suit], ranknames[cards[i].rank]);
+        }
+        send_message(data, response);
     } else if (strcasecmp(msg->paramv[1], "!uptime") == 0) {
         struct timespec current_time;
 
@@ -196,7 +322,7 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
         }
 
         if (matching_indexes.length > 0) {
-            unsigned int reply_i = matching_indexes.array[rand() % matching_indexes.length];
+            unsigned int reply_i = matching_indexes.array[RANDRANGE(matching_indexes.length)];
             snprintf(response, BUFFER_SIZE, "PRIVMSG %s :%s", msg->paramv[0], reply_data->replies[reply_i].reply);
             send_message(data, response);
         }

@@ -14,6 +14,8 @@ int main() {
     bot_data botdata;
     botdata.ssl = NULL;
     botdata.ssl_ctx = NULL;
+    botdata.roulette_chamber = -1;
+    botdata.roulette_current = 0;
 
     if (!load_config(CONFIG_FILE, &botcfg)) {
         return 1;
