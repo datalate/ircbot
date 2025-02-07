@@ -38,6 +38,11 @@ int create_connection(const char address[], const char port[]) {
             continue;
         }
 
+        struct timeval tv;
+        tv.tv_sec = 10 * 60; // timeout after 10 minutes of no activity
+        tv.tv_usec = 0;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
         if (connect(sockfd, rp->ai_addr, rp->ai_addrlen) == -1) {
             fprintf(stderr, "connect() failed\n");
             close(sockfd);
