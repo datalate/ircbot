@@ -14,6 +14,7 @@
 #include <openssl/ssl.h>
 #include <pthread.h>
 #include <pcre2.h>
+#include <assert.h>
 
 #include "common.h"
 #include "config.h"
@@ -22,6 +23,7 @@
 #include "timed_message.h"
 #include "int_array.h"
 #include "bot.h"
+#include "database.h"
 
 typedef struct {
   int suit;
@@ -191,8 +193,8 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
         static const char* ranknames[] = {"?", "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"};
         static const char* winnames[] = {"HIGH CARD", "ONE PAIR", "TWO PAIRS", "THREE-OF-A-KIND", "STRAIGHT", "FLUSH", "FULL HOUSE", "FOUR-OF-A-KIND", "STRAIGHT FLUSH", "ROYAL FLUSH", "FIVE-OF-A-KIND"};
 
-        static card_t cards[CARDS_COUNT];
-        static int discarded = 0;
+        card_t cards[CARDS_COUNT];
+        char deck[255] = {'\0'};
 
         size_t cmdlen = strlen(msg->paramv[1]);
 
@@ -202,15 +204,16 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
             if (slot >= 1 && slot <= 5) keep |= 1 << (slot - 1);
         }
 
-        // TODO: cards not initialized on fresh run when cmdlen >= 8
-        if (discarded > 0 || cmdlen < 8) {
+        get_deck(msg->host, deck); // get and delete deck
+
+        if (strlen(deck) == 0 || cmdlen < 8) {
             // init card array
             for (size_t i = 0; i < CARDS_COUNT - 1; ++i) {
                 cards[i].rank = (i % 13) + 1;
                 cards[i].suit = (i / 13) + 1;
             }
 
-            // joker
+            // insert joker
             cards[CARDS_COUNT - 1].rank = 0;
             cards[CARDS_COUNT - 1].suit = 0;
 
@@ -222,9 +225,33 @@ void handle_privmsg(irc_message *msg, bot_config **config, bot_data *data) {
                 cards[i] = t;
             }
 
-            discarded = 0;
-        } else {
+            // save deck
+            deck[0] = '\0';
+            for (size_t i = 0; i < CARDS_COUNT; ++i) {
+                snprintf(deck + strlen(deck), 255 - strlen(deck), "%x%x ", cards[i].suit, cards[i].rank);
+            }
+
+            save_deck(msg->host, deck);
+        } else { // get deck from db
+            char *dbiterator = deck;
+
+            for (size_t i = 0; i < CARDS_COUNT; ++i) {
+                assert(*dbiterator != '\0'); // only partial deck
+                char *next;
+
+                long card = strtol(dbiterator, &next, 16); // 0x00 - 0xFF
+                int suit = (card & 0xF0) >> 4; // high bit part
+                int rank = (card & 0x0F) >> 0; // low bit part
+                assert(suit <= 4);
+                assert(rank <= 13);
+
+                cards[i].suit = suit;
+                cards[i].rank = rank;
+                dbiterator = next;
+            }
+
             // replace discarded cards
+            int discarded = 0;
             for (size_t i = 0; i < 5; ++i) {
                 int discard = !((keep >> i) & 1);
                 if (discard) cards[i] = cards[5 + discarded++];
