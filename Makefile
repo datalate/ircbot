@@ -12,7 +12,7 @@ OUT = $(BIN_DIR)/bot
 
 CC      = gcc
 CFLAGS  = -D_GNU_SOURCE -D_DEFAULT_SOURCE -Iinclude -Wall -Wextra -g
-LDLIBS  = -lssl -lcrypto -lconfig++ -lpthread -lpcre2-8
+LDLIBS  = -lssl -lcrypto -lconfig++ -lpthread -lpcre2-8 -lsqlite3
 
 all: $(OUT)
 

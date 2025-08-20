@@ -5,6 +5,7 @@
 #include "config.h"
 #include "connection.h"
 #include "bot.h"
+#include "database.h"
 
 #define RECONNECT_INTERVAL 60
 
@@ -18,6 +19,10 @@ int main() {
     botdata.roulette_current = 0;
 
     if (!load_config(CONFIG_FILE, &botcfg)) {
+        return 1;
+    }
+
+    if (open_db("database.db") != 0) {
         return 1;
     }
 
@@ -45,6 +50,8 @@ int main() {
 
     cleanup(&botdata);
     cleanup_config(botcfg);
+
+    close_db();
 
     return 0;
 }
