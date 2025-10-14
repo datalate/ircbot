@@ -18,7 +18,6 @@ LIBS    = $(shell pkg-config --libs openssl sqlite3 libconfig) $(shell pcre2-con
 all: $(OUT)
 
 $(OUT): $(OBJ) | $(BIN_DIR)
-#	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 	$(CC) $(LDFLAGS) $^ -o $@ $(LIBS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
