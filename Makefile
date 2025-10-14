@@ -11,13 +11,15 @@ OBJ = $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 OUT = $(BIN_DIR)/bot
 
 CC      = gcc
-CFLAGS  = -D_GNU_SOURCE -D_DEFAULT_SOURCE -Iinclude -Wall -Wextra -g
-LDLIBS  = -lssl -lcrypto -lconfig++ -lpthread -lpcre2-8 -lsqlite3
+CFLAGS  = -D_GNU_SOURCE -D_DEFAULT_SOURCE -Iinclude -Wall -Wextra -g $(shell pkg-config --cflags openssl sqlite3 libconfig) $(shell pcre2-config --cflags)
+LDFLAGS =
+LIBS    = $(shell pkg-config --libs openssl sqlite3 libconfig) $(shell pcre2-config --libs8) -lpthread
 
 all: $(OUT)
 
 $(OUT): $(OBJ) | $(BIN_DIR)
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+#	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(CC) $(LDFLAGS) $^ -o $@ $(LIBS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
