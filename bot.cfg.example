@@ -6,6 +6,7 @@ general = {
     nickname = "unique_bot_name";
     channel_name = "#bot_testing";
     admin_hostname = "localhost";
+    kicklist = [];
 };
 
 timed_messages = (
