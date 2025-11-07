@@ -32,6 +32,11 @@ typedef struct {
 } bot_config_timed_message_data;
 
 typedef struct {
+    size_t num_hosts;
+    pcre2_code *hosts[];
+} bot_config_kicklist_data;
+
+typedef struct {
     char server_address[256];
     char server_port[6];
     bool use_ssl;
@@ -41,6 +46,7 @@ typedef struct {
     char admin_hostname[64];
     bot_config_reply_data *reply_data;
     bot_config_timed_message_data *timed_message_data;
+    bot_config_kicklist_data *kicklist_data;
 } bot_config;
 
 bool load_config(const char filename[], bot_config **config);

@@ -22,15 +22,57 @@ bool load_config_string(config_setting_t *cfg, const char name[], char* result) 
 }
 
 bool load_config_bool(config_setting_t *cfg, const char name[], bool* result) {
-    int tmp_int;
+    int ret_int;
 
-    if (!config_setting_lookup_bool(cfg, name, &tmp_int)) {
+    if (!config_setting_lookup_bool(cfg, name, &ret_int)) {
         fprintf(stderr, "Configuration missing for field '%s'\n", name);
         return false;
     }
 
-    *result = tmp_int;
+    *result = ret_int;
     return true;
+}
+
+bot_config_kicklist_data* load_config_kicklist(config_t cfg_file) {
+    bot_config_kicklist_data *kicklist_data;
+
+    unsigned int hosts_count = 0;
+    config_setting_t *cfg_setting = config_lookup(&cfg_file, "general.kicklist");
+
+    if (cfg_setting == NULL) {
+        kicklist_data = malloc(sizeof(*kicklist_data));
+    } else {
+        unsigned int kicklist_cfg_count = config_setting_length(cfg_setting);
+        kicklist_data = malloc(sizeof(*kicklist_data) + kicklist_cfg_count * sizeof(kicklist_data->hosts[0]));
+
+        const char *host_str;
+        int errnum;
+        PCRE2_SIZE erroffset;
+        for (unsigned int i = 0; i < kicklist_cfg_count; ++i) {
+            host_str = config_setting_get_string_elem(cfg_setting, i);
+
+            if (host_str == NULL) {
+                fprintf(stderr, "Ignored invalid index %d from kicklist config\n", i);
+                continue;
+            }
+
+            PCRE2_SPTR pattern = (PCRE2_SPTR)host_str;
+            pcre2_code *re = pcre2_compile(pattern, PCRE2_ZERO_TERMINATED, 0, &errnum, &erroffset, NULL);
+            if (re == NULL) {
+                fprintf(stderr, "Invalid regex: '%s' at index %d of kicklist config\n", host_str, i);
+                continue;
+            }
+
+            kicklist_data->hosts[hosts_count] = re;
+            hosts_count++;
+        }
+    }
+
+
+    kicklist_data->num_hosts = hosts_count;
+    printf("Loaded %u hosts from the kicklist config\n", hosts_count);
+
+    return kicklist_data;
 }
 
 bot_config_reply_data* load_config_replies(config_t cfg_file) {
@@ -145,6 +187,7 @@ bool load_config(const char filename[], bot_config **config) {
     new_config = malloc(sizeof(*new_config));
     new_config->reply_data = load_config_replies(cfg_file);
     new_config->timed_message_data = load_config_timed_messages(cfg_file);
+    new_config->kicklist_data = load_config_kicklist(cfg_file);
 
     bool load_ok = false;
     config_setting_t *cfg_setting = config_lookup(&cfg_file, "general");
@@ -153,7 +196,7 @@ bool load_config(const char filename[], bot_config **config) {
         load_ok =
             load_config_string(cfg_setting, "server_address", new_config->server_address) &&
             load_config_string(cfg_setting, "server_port", new_config->server_port) &&
-            load_config_bool(cfg_setting,   "use_ssl", &new_config->use_ssl) &&
+            load_config_bool  (cfg_setting, "use_ssl", &new_config->use_ssl) &&
             load_config_string(cfg_setting, "username", new_config->username) &&
             load_config_string(cfg_setting, "nickname", new_config->nickname) &&
             load_config_string(cfg_setting, "channel_name", new_config->channel_name) &&
@@ -184,8 +227,13 @@ void cleanup_config(bot_config *config) {
         if (reply->use_regex) pcre2_code_free(reply->regex);
     }
 
+    for (unsigned int i = 0; i < config->kicklist_data->num_hosts; ++i) {
+        pcre2_code_free(config->kicklist_data->hosts[i]);
+    }
+
     free(config->reply_data);
     free(config->timed_message_data);
+    free(config->kicklist_data);
     free(config);
 }
 

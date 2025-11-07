@@ -372,6 +372,25 @@ void handle_line(const char line[], bot_config **config, bot_data *data) {
     } else if (strcmp(msg->command, "PRIVMSG") == 0) { // 0: target, 1: message
         handle_privmsg(msg, config, data);
     } else if (strcmp(msg->command, "MODE") == 0) { // 0: target, 1: mode
+    } else if (strcmp(msg->command, "JOIN") == 0) { // 0: channel
+        bot_config_kicklist_data *kicklist = (*config)->kicklist_data;
+        for (unsigned int i = 0; i < kicklist->num_hosts; ++i) {
+            bool match = false;
+
+            pcre2_match_data *match_data = pcre2_match_data_create_from_pattern(kicklist->hosts[i], NULL);
+            PCRE2_SPTR subject = (PCRE2_SPTR)msg->prefix;
+            PCRE2_SIZE subject_length = (PCRE2_SIZE)strlen((char *)subject);
+
+            int rc = pcre2_match(kicklist->hosts[i], subject, subject_length, 0, 0, match_data, NULL);
+            match = rc >= 0;
+
+            pcre2_match_data_free(match_data);
+
+            if (match) {
+                snprintf(response, BUFFER_SIZE, "KICK %s %s", msg->paramv[0], msg->nick);
+                send = true;
+            }
+        }
     } else if (strcmp(msg->command, "INVITE") == 0) { // 0: target, 1: channel
         if (*msg->paramv[1] != '#') return;
 
