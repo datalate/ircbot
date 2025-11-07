@@ -33,44 +33,78 @@ bool load_config_bool(config_setting_t *cfg, const char name[], bool* result) {
     return true;
 }
 
+bool load_config_str_array(config_setting_t *cfg, const char name[], char** result[], unsigned int* result_len) {
+    char **ret_arr;
+
+    unsigned int element_count = 0;
+    config_setting_t *array = config_setting_get_member(cfg, name);
+
+    if (array == NULL) {
+        fprintf(stderr, "Configuration missing for field '%s'\n", name);
+        return false;
+    } else {
+        unsigned int array_len = config_setting_length(array);
+        ret_arr = malloc(sizeof(char *) * array_len);
+
+        const char *elem_str;
+        for (unsigned int i = 0; i < array_len; ++i) {
+            elem_str = config_setting_get_string_elem(array, i);
+
+            if (elem_str == NULL) {
+                fprintf(stderr, "Ignored invalid index %d from array '%s'\n", i, name);
+                continue;
+            }
+
+            ret_arr[element_count] = malloc(64);
+            strncpy(ret_arr[element_count], elem_str, 63);
+            ret_arr[element_count][64] = '\0';
+
+            element_count++;
+        }
+    }
+
+    *result = ret_arr;
+    *result_len = element_count;
+    return true;
+}
+
 bot_config_kicklist_data* load_config_kicklist(config_t cfg_file) {
     bot_config_kicklist_data *kicklist_data;
 
     unsigned int hosts_count = 0;
-    config_setting_t *cfg_setting = config_lookup(&cfg_file, "general.kicklist");
+    int skipped_hosts = 0;
+    char **hosts;
 
-    if (cfg_setting == NULL) {
+    config_setting_t *cfg_setting = config_lookup(&cfg_file, "general");
+
+    if (cfg_setting == NULL || !load_config_str_array(cfg_setting, "kicklist", &hosts, &hosts_count)) {
         kicklist_data = malloc(sizeof(*kicklist_data));
     } else {
-        unsigned int kicklist_cfg_count = config_setting_length(cfg_setting);
-        kicklist_data = malloc(sizeof(*kicklist_data) + kicklist_cfg_count * sizeof(kicklist_data->hosts[0]));
+        kicklist_data = malloc(sizeof(*kicklist_data) + hosts_count * sizeof(kicklist_data->hosts[0]));
 
-        const char *host_str;
+        char *host_str;
         int errnum;
         PCRE2_SIZE erroffset;
-        for (unsigned int i = 0; i < kicklist_cfg_count; ++i) {
-            host_str = config_setting_get_string_elem(cfg_setting, i);
 
-            if (host_str == NULL) {
-                fprintf(stderr, "Ignored invalid index %d from kicklist config\n", i);
-                continue;
-            }
+        for (unsigned int i = 0; i < hosts_count; ++i) {
+            host_str = hosts[i];
 
             PCRE2_SPTR pattern = (PCRE2_SPTR)host_str;
             pcre2_code *re = pcre2_compile(pattern, PCRE2_ZERO_TERMINATED, 0, &errnum, &erroffset, NULL);
             if (re == NULL) {
                 fprintf(stderr, "Invalid regex: '%s' at index %d of kicklist config\n", host_str, i);
-                continue;
+                skipped_hosts++;
+            } else {
+                kicklist_data->hosts[i] = re;
             }
 
-            kicklist_data->hosts[hosts_count] = re;
-            hosts_count++;
+            free(host_str);
         }
     }
 
 
-    kicklist_data->num_hosts = hosts_count;
-    printf("Loaded %u hosts from the kicklist config\n", hosts_count);
+    kicklist_data->num_hosts = hosts_count - skipped_hosts;
+    printf("Loaded %zu hosts from the kicklist config\n", kicklist_data->num_hosts);
 
     return kicklist_data;
 }
